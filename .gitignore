@@ -1,0 +1,21 @@
+.data
+
+# local environment
+.env
+.env.*
+!.env.example
+
+# logs and runtime artifacts
+*.log
+*.out
+tmp/
+tmp/**
+
+# build and coverage artifacts
+bin/
+dist/
+coverage/
+coverage.out
+
+# OS/editor noise
+.DS_Store
