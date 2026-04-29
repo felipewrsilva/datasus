@@ -11,6 +11,7 @@ import { BrazilStateMap } from "@/components/BrazilStateMap";
 import { stateNamePtBR } from "@/lib/stateLabels";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
 import { formatBytes } from "@/lib/formatBytes";
+import { formatDateTimeBR } from "@/lib/dateFormat";
 import { barClassForLevel, sizeToSextileLevel, sortedSizesFromBuckets } from "@/lib/dashboardSizeScale";
 import {
   filesPath,
@@ -19,13 +20,6 @@ import {
 } from "@/lib/dashboardFileDrill";
 
 const POLL_MS = 10_000;
-
-function formatDateSafe(value: string | null | undefined): string {
-  if (!value) return "Data desconhecida";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Data desconhecida";
-  return parsed.toLocaleString();
-}
 
 function useSecondsAgo(date: Date | null): string | null {
   const [now, setNow] = useState(0);
@@ -437,7 +431,7 @@ export default function DashboardPage() {
                       <Link href={`/files/${f.id}`} className="text-sm font-medium text-[var(--accent)] hover:underline">
                         {f.filename}
                       </Link>
-                      <p className="text-xs text-[var(--muted)]">{formatDateSafe(f.remote_timestamp ?? f.last_seen_at)}</p>
+                      <p className="text-xs text-[var(--muted)]">{formatDateTimeBR(f.remote_timestamp ?? f.last_seen_at)}</p>
                     </div>
                     <OverallStatusBadge status={f.overall_status} />
                   </li>

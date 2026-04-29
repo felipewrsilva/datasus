@@ -1,5 +1,6 @@
 import type { Stage } from "@/lib/types";
 import { StageStatusBadge } from "./StageStatusBadge";
+import { formatDateTimeBR } from "@/lib/dateFormat";
 
 const STAGE_LABELS: Record<string, string> = {
   download: "Download",
@@ -20,13 +21,13 @@ export function StageCard({ stage }: { stage: Stage }) {
         {stage.started_at && (
           <>
             <dt>Início</dt>
-            <dd>{new Date(stage.started_at).toLocaleString()}</dd>
+            <dd>{formatDateTimeBR(stage.started_at)}</dd>
           </>
         )}
         {stage.finished_at && (
           <>
             <dt>Fim</dt>
-            <dd>{new Date(stage.finished_at).toLocaleString()}</dd>
+            <dd>{formatDateTimeBR(stage.finished_at)}</dd>
           </>
         )}
         {stage.error_message && (

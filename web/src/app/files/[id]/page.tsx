@@ -10,22 +10,9 @@ import { OverallStatusBadge } from "@/components/StageStatusBadge";
 import { GlobalActions } from "@/components/ActionButtons";
 import { stateNamePtBR } from "@/lib/stateLabels";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
+import { formatDateTimeBR, formatTimeOnlySecondsBR } from "@/lib/dateFormat";
 
 const POLL_MS = 5_000;
-
-function formatDateSafe(value: string | null | undefined): string {
-  if (!value) return "Data desconhecida";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Data desconhecida";
-  return parsed.toLocaleString();
-}
-
-function formatTime(value: string | undefined): string {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
 
 function useSecondsAgo(date: Date | null): string | null {
   const [now, setNow] = useState(0);
@@ -154,7 +141,7 @@ export default function FileDetailPage() {
             <dt className="text-[var(--muted)]">Hash local</dt>
             <dd className="font-mono text-xs">{file.local_hash?.slice(0, 16) ?? "—"}</dd>
             <dt className="text-[var(--muted)]">Última modificação no FTP</dt>
-            <dd>{formatDateSafe(file.remote_timestamp)}</dd>
+            <dd>{formatDateTimeBR(file.remote_timestamp)}</dd>
           </dl>
         </div>
 
@@ -202,7 +189,7 @@ export default function FileDetailPage() {
               logs.map((l) => (
                 <div key={l.id} className="flex gap-3">
                   {l.created_at && (
-                    <span className="shrink-0 text-slate-600">{formatTime(l.created_at)}</span>
+                    <span className="shrink-0 text-slate-600">{formatTimeOnlySecondsBR(l.created_at)}</span>
                   )}
                   <span className="shrink-0 text-slate-500">[{l.stage.slice(0, 3)}]</span>
                   <span className={l.event_type === "failed" ? "text-rose-300" : l.event_type === "completed" ? "text-emerald-300" : "text-slate-300"}>

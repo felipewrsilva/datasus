@@ -98,8 +98,11 @@ describe("DashboardPage", () => {
     vi.mocked(getDashboardInsights).mockResolvedValue(buildInsights());
 
     render(<DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /^painel$/i })).toBeInTheDocument();
+    });
 
-    expect(await screen.findByRole("heading", { name: /resumo/i })).toBeInTheDocument();
+    expect(screen.getByText(/^resumo$/i)).toBeInTheDocument();
     expect(await screen.findByText(/^arquivos$/i)).toBeInTheDocument();
     expect(await screen.findByText(/^concluídos$/i)).toBeInTheDocument();
     expect(await screen.findByText(/^download$/i)).toBeInTheDocument();

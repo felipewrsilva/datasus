@@ -12,17 +12,11 @@ import { overallStatusLabel } from "@/lib/statusLabels";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { areSearchParamsEquivalent, canonicalSearchParamsString } from "@/lib/searchParamsCanonical";
+import { formatDateTimeBR } from "@/lib/dateFormat";
 
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 250;
 const PAGE_SIZE = 100;
-
-function formatDateSafe(value: string | null | undefined): string {
-  if (!value) return "Data desconhecida";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Data desconhecida";
-  return parsed.toLocaleString();
-}
 
 /** Same value the API uses when sorting by last_seen_at: COALESCE(remote_timestamp, last_seen_at). */
 function displayFileTimestamp(f: DatFile): string | null {
@@ -577,7 +571,7 @@ function FilesPageContent() {
                     <td className="px-4 py-3">{stateNamePtBR(f.state)}</td>
                     <td className="px-4 py-3">{f.year}/{String(f.month).padStart(2, "0")}</td>
                     <td className="px-4 py-3"><OverallStatusBadge status={f.overall_status} /></td>
-                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{formatDateSafe(displayFileTimestamp(f))}</td>
+                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{formatDateTimeBR(displayFileTimestamp(f))}</td>
                     <td className="px-4 py-3">
                       <Link href={`/files/${f.id}`} className="text-xs text-[var(--accent)] hover:underline">
                         Detalhes
