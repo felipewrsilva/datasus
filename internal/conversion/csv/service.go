@@ -92,9 +92,18 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	}
 	duration := time.Since(start)
 
-	_ = s.fileRepo.UpdatePaths(ctx, file.ID, file.DBCPath, &csvPath, file.ParquetPath)
-	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusCSVReady)
-	_ = s.stageRepo.SetDone(ctx, file.ID, domain.StageCSVConversion)
+	if err := s.fileRepo.UpdatePaths(ctx, file.ID, file.DBCPath, &csvPath, file.ParquetPath); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("update paths: %w", err))
+	}
+	if err := s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusCSVReady); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("update status: %w", err))
+	}
+	if err := s.stageRepo.SetDone(ctx, file.ID, domain.StageCSVConversion); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("mark stage done: %w", err))
+	}
 
 	_ = s.logRepo.Insert(ctx, file.ID, domain.StageCSVConversion, "completed",
 		fmt.Sprintf("csv ready in %.1fs", duration.Seconds()),

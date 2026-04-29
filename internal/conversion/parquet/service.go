@@ -92,9 +92,18 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	}
 	duration := time.Since(start)
 
-	_ = s.fileRepo.UpdatePaths(ctx, file.ID, file.DBCPath, file.CSVPath, &parquetPath)
-	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusParquetReady)
-	_ = s.stageRepo.SetDone(ctx, file.ID, domain.StageParquetConversion)
+	if err := s.fileRepo.UpdatePaths(ctx, file.ID, file.DBCPath, file.CSVPath, &parquetPath); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("update paths: %w", err))
+	}
+	if err := s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusParquetReady); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("update status: %w", err))
+	}
+	if err := s.stageRepo.SetDone(ctx, file.ID, domain.StageParquetConversion); err != nil {
+		status = "failure"
+		return s.fail(ctx, file, fmt.Errorf("mark stage done: %w", err))
+	}
 
 	_ = s.logRepo.Insert(ctx, file.ID, domain.StageParquetConversion, "completed",
 		fmt.Sprintf("parquet ready in %.1fs", duration.Seconds()),

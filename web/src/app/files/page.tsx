@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getFileFacets, getFiles } from "@/lib/api";
@@ -11,6 +11,7 @@ import { formatCatalogLabel } from "@/lib/catalogLabels";
 import { overallStatusLabel } from "@/lib/statusLabels";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { areSearchParamsEquivalent, canonicalSearchParamsString } from "@/lib/searchParamsCanonical";
 
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 250;
@@ -21,6 +22,11 @@ function formatDateSafe(value: string | null | undefined): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Data desconhecida";
   return parsed.toLocaleString();
+}
+
+/** Same value the API uses when sorting by last_seen_at: COALESCE(remote_timestamp, last_seen_at). */
+function displayFileTimestamp(f: DatFile): string | null {
+  return f.remote_timestamp ?? f.last_seen_at ?? null;
 }
 
 function periodKey(year: number, month: number): string {
@@ -71,64 +77,72 @@ function useSecondsAgo(date: Date | null): string | null {
   return s < 5 ? "agora" : `há ${s}s`;
 }
 
+function parseSortDirFromSearchParams(sp: { get: (k: string) => string | null }): "asc" | "desc" {
+  const sd = sp.get("sort_dir");
+  return sd === "asc" || sd === "desc" ? sd : "desc";
+}
+
+function parsePageFromSearchParams(sp: { get: (k: string) => string | null }): number {
+  const pg = sp.get("page");
+  return pg ? Math.max(0, parseInt(pg, 10) - 1) : 0;
+}
+
 function FilesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [files, setFiles] = useState<DatFile[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(() => parsePageFromSearchParams(searchParams));
   const [facets, setFacets] = useState<FileFacetsResponse>({ catalogs: [], states: [], statuses: [], periods: [] });
+  const [facetsLoaded, setFacetsLoaded] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [tableBusy, setTableBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const ago = useSecondsAgo(lastUpdated);
 
-  const [rawFilename, setRawFilename] = useState("");
-  const [selectedCatalogs, setSelectedCatalogs] = useState<string[]>([]);
-  const [selectedStates, setSelectedStates] = useState<string[]>([]);
-  const [selectedStatuses, setSelectedStatuses] = useState<OverallStatus[]>([]);
-  const [rawPeriodFrom, setRawPeriodFrom] = useState("");
-  const [rawPeriodTo, setRawPeriodTo] = useState("");
-  const [policyMatchStatus, setPolicyMatchStatus] = useState<FilePolicyMatch | "">("");
-  const [pipelineCompleted, setPipelineCompleted] = useState(false);
+  const [rawFilename, setRawFilename] = useState(() => searchParams.get("filename") ?? "");
+  const [selectedCatalogs, setSelectedCatalogs] = useState(() => parseCatalogsFromSearchParams(searchParams));
+  const [selectedStates, setSelectedStates] = useState(() =>
+    searchParams.getAll("state").map((item) => item.trim().toUpperCase()).filter(Boolean),
+  );
+  const [selectedStatuses, setSelectedStatuses] = useState<OverallStatus[]>(() =>
+    searchParams.getAll("status").map((item) => item.trim().toLowerCase() as OverallStatus).filter(Boolean),
+  );
+  const [rawPeriodFrom, setRawPeriodFrom] = useState(() => searchParams.get("period_from") ?? "");
+  const [rawPeriodTo, setRawPeriodTo] = useState(() => searchParams.get("period_to") ?? "");
+  const [policyMatchStatus, setPolicyMatchStatus] = useState<FilePolicyMatch | "">(() =>
+    normalizePolicyMatchParam(searchParams.get("policy_match")),
+  );
+  const [pipelineCompleted, setPipelineCompleted] = useState(() =>
+    normalizePipelineCompletedParam(searchParams.get("pipeline_completed")),
+  );
 
   const filename = useDebouncedValue(rawFilename, DEBOUNCE_MS);
   const catalogsDebounced = useDebouncedValue(selectedCatalogs, DEBOUNCE_MS);
   const statesDebounced = useDebouncedValue(selectedStates, DEBOUNCE_MS);
   const statusesDebounced = useDebouncedValue(selectedStatuses, DEBOUNCE_MS);
 
-  const [sortBy, setSortBy] = useState("last_seen_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortBy, setSortBy] = useState(() => searchParams.get("sort_by") ?? "last_seen_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => parseSortDirFromSearchParams(searchParams));
 
-  useEffect(() => {
-    const syncFromUrl = setTimeout(() => {
-      setRawFilename(searchParams.get("filename") ?? "");
-      setSelectedCatalogs(parseCatalogsFromSearchParams(searchParams));
-      setSelectedStates(searchParams.getAll("state").map((item) => item.trim().toUpperCase()).filter(Boolean));
-      setSelectedStatuses(
-        searchParams.getAll("status").map((item) => item.trim().toLowerCase() as OverallStatus).filter(Boolean),
-      );
-      setRawPeriodFrom(searchParams.get("period_from") ?? "");
-      setRawPeriodTo(searchParams.get("period_to") ?? "");
-      setPolicyMatchStatus(normalizePolicyMatchParam(searchParams.get("policy_match")));
-      setPipelineCompleted(normalizePipelineCompletedParam(searchParams.get("pipeline_completed")));
-      setSortBy(searchParams.get("sort_by") ?? "last_seen_at");
-      const sd = searchParams.get("sort_dir");
-      setSortDir(sd === "asc" || sd === "desc" ? sd : "desc");
-      const pg = searchParams.get("page");
-      setPage(pg ? Math.max(0, parseInt(pg, 10) - 1) : 0);
-    }, 0);
-    return () => clearTimeout(syncFromUrl);
-  }, [searchParams]);
+  const searchParamsSnapshot = searchParams.toString();
+  const urlCanonicalKey = useMemo(
+    () => canonicalSearchParamsString(searchParamsSnapshot),
+    [searchParamsSnapshot],
+  );
 
   const periodOptions = useMemo(
     () => facets.periods.map((item) => periodKey(item.year, item.month)),
     [facets.periods],
   );
   const periodOptionSet = useMemo(() => new Set(periodOptions), [periodOptions]);
-  const normalizedPeriodFrom = periodOptionSet.has(rawPeriodFrom) ? rawPeriodFrom : "";
-  const normalizedPeriodTo = periodOptionSet.has(rawPeriodTo) ? rawPeriodTo : "";
+  // Until facets load, keep period_* from the URL in sync; avoid stripping deep links while periodOptionSet is empty.
+  const normalizedPeriodFrom =
+    !facetsLoaded || rawPeriodFrom === "" ? rawPeriodFrom : periodOptionSet.has(rawPeriodFrom) ? rawPeriodFrom : "";
+  const normalizedPeriodTo =
+    !facetsLoaded || rawPeriodTo === "" ? rawPeriodTo : periodOptionSet.has(rawPeriodTo) ? rawPeriodTo : "";
 
   const from = useMemo(() => {
     const [y, m] = normalizedPeriodFrom.split("-").map(Number);
@@ -144,6 +158,26 @@ function FilesPageContent() {
     if (!from || !to) return true;
     return (from.year < to.year) || (from.year === to.year && from.month <= to.month);
   }, [from, to]);
+
+  useLayoutEffect(() => {
+    /* URL (browser history) is external; hydrate React state before the push useEffect runs. */
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setRawFilename(searchParams.get("filename") ?? "");
+    setSelectedCatalogs(parseCatalogsFromSearchParams(searchParams));
+    setSelectedStates(searchParams.getAll("state").map((item) => item.trim().toUpperCase()).filter(Boolean));
+    setSelectedStatuses(
+      searchParams.getAll("status").map((item) => item.trim().toLowerCase() as OverallStatus).filter(Boolean),
+    );
+    setRawPeriodFrom(searchParams.get("period_from") ?? "");
+    setRawPeriodTo(searchParams.get("period_to") ?? "");
+    setPolicyMatchStatus(normalizePolicyMatchParam(searchParams.get("policy_match")));
+    setPipelineCompleted(normalizePipelineCompletedParam(searchParams.get("pipeline_completed")));
+    setSortBy(searchParams.get("sort_by") ?? "last_seen_at");
+    setSortDir(parseSortDirFromSearchParams(searchParams));
+    setPage(parsePageFromSearchParams(searchParams));
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- searchParams matches the render for this urlCanonicalKey
+  }, [urlCanonicalKey]);
 
   const filters: FileFilters = useMemo(() => {
     const statusesWithPolicy =
@@ -176,7 +210,8 @@ function FilesPageContent() {
     isPeriodRangeValid,
   ]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (mode: "interactive" | "background" = "interactive") => {
+    if (mode === "interactive") setTableBusy(true);
     setFetching(true);
     setError(null);
     try {
@@ -189,6 +224,7 @@ function FilesPageContent() {
       setError(err instanceof Error ? err.message : "Falha ao carregar arquivos.");
     } finally {
       setFetching(false);
+      if (mode === "interactive") setTableBusy(false);
     }
   }, [filters, page]);
 
@@ -200,6 +236,8 @@ function FilesPageContent() {
           setFacets(response);
         } catch {
           setFacets({ catalogs: [], states: [], statuses: [], periods: [] });
+        } finally {
+          setFacetsLoaded(true);
         }
       })();
     }, 0);
@@ -207,10 +245,10 @@ function FilesPageContent() {
   }, []);
 
   useEffect(() => {
-    const boot = setTimeout(() => { void load(); }, 0);
+    const boot = setTimeout(() => { void load("interactive"); }, 0);
     const t = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      void load();
+      void load("background");
     }, POLL_MS);
     return () => { clearTimeout(boot); clearInterval(t); };
   }, [load]);
@@ -230,10 +268,9 @@ function FilesPageContent() {
     params.set("page_size", String(PAGE_SIZE));
     if (page > 0) params.set("page", String(page + 1));
     const nextQuery = params.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery === currentQuery) return;
+    if (areSearchParamsEquivalent(nextQuery, urlCanonicalKey)) return;
     router.replace(nextQuery ? `/files?${nextQuery}` : "/files");
-  }, [rawFilename, selectedCatalogs, selectedStates, normalizedPeriodFrom, normalizedPeriodTo, selectedStatuses, policyMatchStatus, pipelineCompleted, page, sortBy, sortDir, router, searchParams]);
+  }, [rawFilename, selectedCatalogs, selectedStates, normalizedPeriodFrom, normalizedPeriodTo, selectedStatuses, policyMatchStatus, pipelineCompleted, page, sortBy, sortDir, router, urlCanonicalKey]);
 
   const toggleCatalog = (value: string) => {
     setSelectedCatalogs((prev) => prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]);
@@ -460,23 +497,48 @@ function FilesPageContent() {
           </div>
         </div>
 
-        <div className="glass-card-strong overflow-hidden rounded-2xl">
-          <div className="overflow-x-auto">
-            <table className="min-w-[860px] w-full text-sm">
+        <div className="glass-card-strong relative overflow-hidden rounded-2xl">
+          {tableBusy && initialized ? (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--background)]/55 backdrop-blur-[1px]"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm text-[var(--foreground)] shadow-sm">
+                <span
+                  className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent"
+                  aria-hidden={true}
+                />
+                Atualizando…
+              </div>
+            </div>
+          ) : null}
+          <div
+            className={`overflow-x-auto ${tableBusy && initialized ? "pointer-events-none select-none opacity-60" : ""}`}
+          >
+            <table className="min-w-[860px] w-full text-sm" aria-busy={tableBusy && initialized}>
             <thead className="border-b border-[var(--border)] bg-[var(--accent-soft)]/40">
               <tr>
                 {[
                   { label: "Arquivo", sort: "filename" },
                   { label: "Catálogo", sort: "catalog" },
                   { label: "Estado", sort: "state" },
-                  { label: "Ano/Mês", sort: "year" },
+                  { label: "Ano/Mês", sort: "year_month" },
                   { label: "Status", sort: "overall_status" },
                   { label: "Última atualização", sort: "last_seen_at" },
                   { label: "", sort: "" },
                 ].map((h) => (
-                  <th key={h.label || "details"} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--muted)]">
+                  <th
+                    key={h.label || "details"}
+                    className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--muted)]"
+                    aria-sort={h.sort ? (sortBy === h.sort ? (sortDir === "asc" ? "ascending" : "descending") : "none") : undefined}
+                  >
                     {h.sort ? (
-                      <button type="button" onClick={() => onSort(h.sort)} className="inline-flex items-center gap-1 hover:text-[var(--foreground)]">
+                      <button
+                        type="button"
+                        onClick={() => onSort(h.sort)}
+                        disabled={tableBusy}
+                        className="inline-flex items-center gap-1 hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
                         <span>{h.label}</span>
                         <span className={sortBy === h.sort ? "text-[var(--foreground)]" : ""}>
                           {sortBy === h.sort ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
@@ -516,7 +578,7 @@ function FilesPageContent() {
                     <td className="px-4 py-3">{stateNamePtBR(f.state)}</td>
                     <td className="px-4 py-3">{f.year}/{String(f.month).padStart(2, "0")}</td>
                     <td className="px-4 py-3"><OverallStatusBadge status={f.overall_status} /></td>
-                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{formatDateSafe(f.remote_timestamp ?? f.last_seen_at)}</td>
+                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{formatDateSafe(displayFileTimestamp(f))}</td>
                     <td className="px-4 py-3">
                       <Link href={`/files/${f.id}`} className="text-xs text-[var(--accent)] hover:underline">
                         Detalhes
@@ -540,7 +602,7 @@ function FilesPageContent() {
           <div className="flex gap-2">
             <Button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
+              disabled={page === 0 || tableBusy}
               variant="secondary"
               size="sm"
             >
@@ -548,7 +610,7 @@ function FilesPageContent() {
             </Button>
             <Button
               onClick={() => setPage((p) => p + 1)}
-              disabled={(page + 1) * PAGE_SIZE >= total}
+              disabled={(page + 1) * PAGE_SIZE >= total || tableBusy}
               variant="secondary"
               size="sm"
             >

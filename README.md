@@ -44,6 +44,27 @@ docker compose up --build -d
 - Web: <http://localhost:3002>
 - Metabase: <http://localhost:3001>
 
+### Metabase (first run)
+
+Compose provisions a dedicated Postgres database `metabase` for Metabase’s own metadata (pipeline data stays in `datasus`). The app DB connection uses `sslmode=disable` so the container can reach Postgres without TLS.
+
+After `docker compose up --build -d`, run the setup helper once (creates an admin user and registers the **DATASUS Pipeline** database pointing at host `db`):
+
+```bash
+make metabase-setup
+# or: python scripts/metabase_setup.py
+```
+
+Defaults (override with env vars if needed):
+
+- URL: `http://localhost:3001` (`METABASE_URL`)
+- Admin email: `admin@datasus.local` (`METABASE_ADMIN_EMAIL`)
+- Admin password: `MetabaseLocal#2026` (`METABASE_ADMIN_PASSWORD`; Metabase rejects overly simple passwords)
+
+If Metabase was already configured before this change, you may need to run the script again or finish the in-browser wizard; old Metabase tables left inside `datasus` can be ignored or removed manually.
+
+To add the pipeline DB by hand instead: PostgreSQL, host **`db`**, port **5432**, database **`datasus`**, user **`datasus`**, password **`datasus`**, SSL off.
+
 ## Useful commands
 
 From repository root:
@@ -87,9 +108,3 @@ Important ones:
 - `DOWNLOAD_WORKERS`, `CSV_WORKERS`, `PARQUET_WORKERS`
 - `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`, `STUCK_JOB_TIMEOUT`
 - `LOG_LEVEL`, `API_PORT`
-
-## Notes
-
-- The Go module currently uses a local replace directive:
-  - `github.com/felipewrsilva/datasusdbc => ../datasusdbc`
-- Ensure that sibling repository exists locally when building/running.

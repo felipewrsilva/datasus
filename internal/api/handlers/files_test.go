@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 
 	"datasus/internal/domain"
@@ -46,6 +47,33 @@ func TestSumStatusCounts(t *testing.T) {
 				t.Fatalf("sumStatusCounts() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestInsightsContractJSON documents the dashboard API shape for processing transparency.
+func TestInsightsContractJSON(t *testing.T) {
+	t.Parallel()
+	const sample = `{
+		"processing": {"enable_download": true, "enable_csv": true, "enable_parquet": true},
+		"expected_terminal_status": "parquet_ready",
+		"stage_done_counts": {"download": 0, "csv_conversion": 0, "parquet_conversion": 0}
+	}`
+	var payload struct {
+		Processing             map[string]bool  `json:"processing"`
+		ExpectedTerminalStatus string           `json:"expected_terminal_status"`
+		StageDoneCounts        map[string]int64 `json:"stage_done_counts"`
+	}
+	if err := json.Unmarshal([]byte(sample), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !payload.Processing["enable_parquet"] {
+		t.Fatalf("enable_parquet: %+v", payload.Processing)
+	}
+	if payload.ExpectedTerminalStatus != "parquet_ready" {
+		t.Fatalf("terminal: %q", payload.ExpectedTerminalStatus)
+	}
+	if _, ok := payload.StageDoneCounts["parquet_conversion"]; !ok {
+		t.Fatalf("stage_done_counts: %+v", payload.StageDoneCounts)
 	}
 }
 

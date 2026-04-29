@@ -199,6 +199,11 @@ func (h *FilesHandler) Insights(w http.ResponseWriter, r *http.Request) {
 	requireDownload := true
 	requireCSV := true
 	requireParquet := true
+	processingPayload := map[string]bool{
+		"enable_download": true,
+		"enable_csv":      true,
+		"enable_parquet":  true,
+	}
 	if h.policyRepo != nil {
 		pendingPolicy, ignoredPolicy, err := h.policyRepo.PendingAndIgnoredCounts(r.Context())
 		if err != nil {
@@ -216,6 +221,11 @@ func (h *FilesHandler) Insights(w http.ResponseWriter, r *http.Request) {
 		requireDownload = processing.EnableDownload
 		requireCSV = processing.EnableCSV
 		requireParquet = processing.EnableParquet
+		processingPayload = map[string]bool{
+			"enable_download": processing.EnableDownload,
+			"enable_csv":      processing.EnableCSV,
+			"enable_parquet":  processing.EnableParquet,
+		}
 	}
 
 	expectedTerminalStatus := expectedCompletedStatus(requireDownload, requireCSV, requireParquet)
@@ -226,6 +236,11 @@ func (h *FilesHandler) Insights(w http.ResponseWriter, r *http.Request) {
 		requireCSV,
 		requireParquet,
 	)
+	if err != nil {
+		jsonError(w, err, 500)
+		return
+	}
+	stageDoneCounts, err := h.stageRepo.StageDoneCounts(r.Context())
 	if err != nil {
 		jsonError(w, err, 500)
 		return
@@ -245,6 +260,13 @@ func (h *FilesHandler) Insights(w http.ResponseWriter, r *http.Request) {
 		"status_stage_mismatch_count": pipelineConsistency.StatusStageMismatchCount,
 		"by_catalog_total_mismatch":   byCatalogTotal - totalFiles,
 		"by_state_total_mismatch":     byStateTotal - totalFiles,
+		"processing":                  processingPayload,
+		"expected_terminal_status":    string(expectedTerminalStatus),
+		"stage_done_counts": map[string]int64{
+			"download":           stageDoneCounts.Download,
+			"csv_conversion":     stageDoneCounts.CSVConversion,
+			"parquet_conversion": stageDoneCounts.ParquetConversion,
+		},
 	})
 }
 

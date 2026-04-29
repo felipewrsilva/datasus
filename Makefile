@@ -33,6 +33,10 @@ down:
 logs:
 	docker compose logs -f
 
+# First-time Metabase wizard (admin user + DATASUS Pipeline DB). Requires Python 3.
+metabase-setup:
+	python scripts/metabase_setup.py
+
 # Scale workers
 scale-workers:
 	docker compose up --scale worker=3 -d

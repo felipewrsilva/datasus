@@ -102,6 +102,20 @@ export interface FailureReasonCount {
   count: number;
 }
 
+/** Global pipeline toggles; same source as dashboard pipeline_completed predicate. */
+export interface ProcessingPolicySnapshot {
+  enable_download: boolean;
+  enable_csv: boolean;
+  enable_parquet: boolean;
+}
+
+/** Counts of file_stages rows with status=done per stage (one row per file per stage). */
+export interface StageDoneCounts {
+  download: number;
+  csv_conversion: number;
+  parquet_conversion: number;
+}
+
 export interface DashboardInsights {
   total_files: number;
   status_counts: Stats;
@@ -117,6 +131,10 @@ export interface DashboardInsights {
   status_stage_mismatch_count: number;
   by_catalog_total_mismatch: number;
   by_state_total_mismatch: number;
+  /** Present on API v2+; defaults applied in normalize when missing. */
+  processing?: ProcessingPolicySnapshot;
+  expected_terminal_status?: OverallStatus;
+  stage_done_counts?: StageDoneCounts;
 }
 
 export interface ScanResult {

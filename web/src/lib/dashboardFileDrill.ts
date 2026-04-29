@@ -17,7 +17,7 @@ export function filesPathMultiStatus(statuses: string[]): string {
   return `/files?${params.toString()}`;
 }
 
-/** Matches dashboard pipeline_completed_count (stages + processing policy), not overall_status alone. */
+/** Matches dashboard pipeline_completed_count / KPI “Pipeline OK (política)” — etapas em file_stages + política global. */
 export function filesPathPipelineCompleted(): string {
   return "/files?pipeline_completed=1";
 }

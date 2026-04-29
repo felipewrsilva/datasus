@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import brazilMap from "@svg-maps/brazil";
 import { stateNamePtBR } from "@/lib/stateLabels";
-import { formatBytes, formatSizeAndFileCount } from "@/lib/formatBytes";
+import { formatSizeAndFileCount } from "@/lib/formatBytes";
 import { filesPath } from "@/lib/dashboardFileDrill";
 import {
   mapFillPalette,
@@ -23,18 +23,10 @@ type Props = {
   states: StateSize[];
 };
 
-const TOOLTIP_OFFSET_X = 8;
-const TOOLTIP_OFFSET_Y = 6;
-
 export function BrazilStateMap({ states }: Props) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
-  const pointerPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const hasPointerRef = useRef(false);
-  const activeTooltipRef = useRef(false);
-  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -104,60 +96,6 @@ export function BrazilStateMap({ states }: Props) {
     return `${formatBytesRounded(lo)} a ${formatBytesRounded(hi)}`;
   };
 
-  const activeStateData = activeUF ? byState.get(activeUF) : null;
-  const activeTotalSize = activeStateData?.total_size_bytes ?? 0;
-  const activeCount = activeStateData?.count ?? 0;
-  const activeSizeLabel = Number.isFinite(activeTotalSize) && activeTotalSize > 0 ? formatBytes(activeTotalSize) : "0 GB";
-  const normalizedCount = Number.isFinite(activeCount) && activeCount > 0 ? Math.trunc(activeCount) : 0;
-  const activeCountLabel = `(${normalizedCount.toLocaleString("pt-BR")} arquivos)`;
-
-  const applyTooltipPosition = useCallback((tooltipEl: HTMLDivElement) => {
-    const x = pointerPosRef.current.x + TOOLTIP_OFFSET_X;
-    const y = pointerPosRef.current.y - TOOLTIP_OFFSET_Y;
-    tooltipEl.style.transform = `translate3d(${x}px, ${y}px, 0) translateY(-100%)`;
-  }, []);
-
-  const renderTooltipFrame = useCallback(() => {
-    frameRef.current = null;
-    const tooltipEl = tooltipRef.current;
-    if (!tooltipEl || !activeTooltipRef.current || !hasPointerRef.current) return;
-    applyTooltipPosition(tooltipEl);
-  }, [applyTooltipPosition]);
-
-  const scheduleTooltipFrame = useCallback(() => {
-    if (frameRef.current !== null) return;
-    frameRef.current = window.requestAnimationFrame(renderTooltipFrame);
-  }, [renderTooltipFrame]);
-
-  useEffect(() => {
-    activeTooltipRef.current = Boolean(activeUF);
-    if (!activeTooltipRef.current) return;
-    if (!hasPointerRef.current) return;
-    const tooltipEl = tooltipRef.current;
-    if (tooltipEl) applyTooltipPosition(tooltipEl);
-    scheduleTooltipFrame();
-  }, [activeUF, applyTooltipPosition, scheduleTooltipFrame]);
-
-  useEffect(() => {
-    if (!activeUF) return;
-    const handlePointerMove = (event: PointerEvent) => {
-      pointerPosRef.current = { x: event.clientX, y: event.clientY };
-      hasPointerRef.current = true;
-      scheduleTooltipFrame();
-    };
-    window.addEventListener("pointermove", handlePointerMove, { passive: true });
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-    };
-  }, [activeUF, scheduleTooltipFrame]);
-
-  useEffect(() => () => {
-    if (frameRef.current !== null) {
-      window.cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-  }, []);
-
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2.1fr_1fr]">
       <div className="rounded-2xl border border-sky-200/90 bg-sky-100/70 p-3 dark:border-[var(--border)] dark:bg-[var(--accent-soft)]/15">
@@ -193,43 +131,18 @@ export function BrazilStateMap({ states }: Props) {
                     cursor: "pointer",
                     filter: isActive ? activeShadow : undefined,
                   }}
-                  onPointerEnter={(event) => {
-                    pointerPosRef.current = { x: event.clientX, y: event.clientY };
-                    hasPointerRef.current = true;
+                  onPointerEnter={() => {
                     setHovered(uf);
-                    const tooltipEl = tooltipRef.current;
-                    if (tooltipEl) applyTooltipPosition(tooltipEl);
-                    scheduleTooltipFrame();
                   }}
-                  onFocus={() => {
-                    setFocused(uf);
-                    scheduleTooltipFrame();
-                  }}
+                  onFocus={() => setFocused(uf)}
                   onBlur={() => setFocused(null)}
-                />
+                >
+                  <title>{label}</title>
+                </path>
               </a>
             );
           })}
         </svg>
-        <div
-          ref={tooltipRef}
-          className="pointer-events-none fixed left-0 top-0 z-50 max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--card-strong)] px-3 py-2 shadow-xl backdrop-blur-sm transition-opacity duration-75"
-          style={{
-            willChange: "transform",
-            transform: "translate3d(0, 0, 0)",
-            opacity: activeUF ? 1 : 0,
-            visibility: activeUF ? "visible" : "hidden",
-          }}
-          role="status"
-          aria-live="polite"
-          aria-hidden={!activeUF}
-        >
-          <p className="mb-0.5 text-xs text-[var(--muted)]">{activeUF ? stateNamePtBR(activeUF) : ""}</p>
-          <p className="text-sm font-semibold tabular-nums leading-tight text-[var(--foreground)]">
-            {activeUF ? activeSizeLabel : ""}
-          </p>
-          <p className="mt-0.5 text-xs tabular-nums text-[var(--muted)]">{activeUF ? activeCountLabel : ""}</p>
-        </div>
       </div>
 
       <div className="space-y-3">

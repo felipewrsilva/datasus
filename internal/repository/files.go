@@ -196,14 +196,17 @@ func (r *FileRepository) List(ctx context.Context, f ListFilters) ([]*domain.Fil
 		)
 	}
 
-	sortBy := "last_seen_at"
-	switch f.SortBy {
-	case "filename", "catalog", "state", "year", "month", "overall_status", "last_seen_at", "updated_at", "created_at":
-		sortBy = f.SortBy
-	}
 	sortDir := "DESC"
 	if f.SortDir == "asc" || f.SortDir == "ASC" {
 		sortDir = "ASC"
+	}
+	// Matches UI: remote FTP time when set, else last ingestion time (see web displayFileTimestamp).
+	orderBy := fmt.Sprintf("COALESCE(remote_timestamp, last_seen_at) %s", sortDir)
+	switch f.SortBy {
+	case "year_month":
+		orderBy = fmt.Sprintf("year %s, month %s", sortDir, sortDir)
+	case "filename", "catalog", "state", "year", "month", "overall_status", "updated_at", "created_at":
+		orderBy = f.SortBy + " " + sortDir
 	}
 
 	// Count
@@ -220,8 +223,8 @@ func (r *FileRepository) List(ctx context.Context, f ListFilters) ([]*domain.Fil
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
 		FROM files %s
-		ORDER BY %s %s, id ASC
-		LIMIT $%d OFFSET $%d`, where, sortBy, sortDir, len(args)-1, len(args))
+		ORDER BY %s, id ASC
+		LIMIT $%d OFFSET $%d`, where, orderBy, len(args)-1, len(args))
 
 	rows, err := r.db.Query(ctx, listQ, args...)
 	if err != nil {

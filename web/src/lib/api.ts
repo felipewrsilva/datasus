@@ -13,6 +13,9 @@ import type {
   PoliciesResponse,
   BatchResult,
   BatchPreview,
+  ProcessingPolicySnapshot,
+  StageDoneCounts,
+  OverallStatus,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -98,6 +101,37 @@ function normalizeDashboardInsights(raw: unknown): DashboardInsights {
     {}
   ) as Record<string, number>;
   const policyRaw = (pick<Record<string, unknown>>(r, "policy_counts", "PolicyCounts") ?? {});
+  const processingRaw = pick<Record<string, unknown>>(r, "processing", "Processing");
+  const processing: ProcessingPolicySnapshot | undefined = processingRaw
+    ? {
+        enable_download: Boolean(
+          pick<boolean | number | string>(processingRaw, "enable_download", "EnableDownload") ?? true,
+        ),
+        enable_csv: Boolean(
+          pick<boolean | number | string>(processingRaw, "enable_csv", "EnableCSV") ?? true,
+        ),
+        enable_parquet: Boolean(
+          pick<boolean | number | string>(processingRaw, "enable_parquet", "EnableParquet") ?? true,
+        ),
+      }
+    : {
+        enable_download: true,
+        enable_csv: true,
+        enable_parquet: true,
+      };
+  const stageDoneRaw = pick<Record<string, unknown>>(r, "stage_done_counts", "StageDoneCounts");
+  const stage_done_counts: StageDoneCounts | undefined = stageDoneRaw
+    ? {
+        download: Number(pick<number | string>(stageDoneRaw, "download", "Download") ?? 0),
+        csv_conversion: Number(
+          pick<number | string>(stageDoneRaw, "csv_conversion", "CsvConversion", "CSVConversion") ?? 0,
+        ),
+        parquet_conversion: Number(
+          pick<number | string>(stageDoneRaw, "parquet_conversion", "ParquetConversion") ?? 0,
+        ),
+      }
+    : undefined;
+  const expectedTerminal = pick<string>(r, "expected_terminal_status", "ExpectedTerminalStatus");
   return {
     total_files: Number(
       pick<number | string>(r, "total_files", "TotalFiles") ??
@@ -124,6 +158,9 @@ function normalizeDashboardInsights(raw: unknown): DashboardInsights {
     by_state_total_mismatch: Number(
       pick<number | string>(r, "by_state_total_mismatch", "ByStateTotalMismatch") ?? 0,
     ),
+    processing,
+    expected_terminal_status: (expectedTerminal ?? "parquet_ready") as OverallStatus,
+    stage_done_counts,
   };
 }
 

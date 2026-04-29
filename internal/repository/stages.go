@@ -34,6 +34,14 @@ type PipelineConsistency struct {
 	StatusStageMismatchCount int64 `json:"status_stage_mismatch_count"`
 }
 
+// StageDoneCounts is the number of file_stages rows with status=done per stage
+// (one row per file per stage, so counts are per-file completions).
+type StageDoneCounts struct {
+	Download          int64 `json:"download"`
+	CSVConversion     int64 `json:"csv_conversion"`
+	ParquetConversion int64 `json:"parquet_conversion"`
+}
+
 func NewStageRepository(db *pgxpool.Pool) *StageRepository {
 	return &StageRepository{db: db}
 }
@@ -182,6 +190,21 @@ func (r *StageRepository) Bottlenecks(ctx context.Context) ([]StageBottleneck, e
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// StageDoneCounts returns how many files have each stage marked done in file_stages.
+func (r *StageRepository) StageDoneCounts(ctx context.Context) (StageDoneCounts, error) {
+	const q = `
+		SELECT
+			COUNT(*) FILTER (WHERE stage = 'download' AND status = 'done') AS download_done,
+			COUNT(*) FILTER (WHERE stage = 'csv_conversion' AND status = 'done') AS csv_done,
+			COUNT(*) FILTER (WHERE stage = 'parquet_conversion' AND status = 'done') AS parquet_done
+		FROM file_stages`
+	var out StageDoneCounts
+	if err := r.db.QueryRow(ctx, q).Scan(&out.Download, &out.CSVConversion, &out.ParquetConversion); err != nil {
+		return StageDoneCounts{}, fmt.Errorf("stage done counts: %w", err)
+	}
+	return out, nil
 }
 
 func (r *StageRepository) PipelineConsistency(

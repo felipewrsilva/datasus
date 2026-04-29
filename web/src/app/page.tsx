@@ -91,34 +91,39 @@ export default function DashboardPage() {
     [insights?.by_state],
   );
 
-  const kpiCards = [
-    { label: "Arquivos totais", value: total, color: "text-[var(--foreground)]", href: "/files" },
-    {
-      label: "Processados",
-      value: insights?.pipeline_completed_count ?? 0,
-      color: "text-[var(--status-success-fg)]",
-      href: filesPathPipelineCompleted(),
-    },
-    {
-      label: "Em processamento",
-      value: (stats?.downloading ?? 0) + (stats?.converting_csv ?? 0) + (stats?.converting_parquet ?? 0),
-      color: "text-[var(--status-info-fg)]",
-      href: filesPathMultiStatus(["downloading", "converting_csv", "converting_parquet"]),
-    },
-    { label: "Falhas", value: stats?.failed ?? 0, color: "text-[var(--status-danger-fg)]", href: filesPath({ status: "failed" }) },
-    {
-      label: "Pendentes",
-      value: policyCounts.pending,
-      color: "text-[var(--status-warning-fg)]",
-      href: filesPath({ status: "pending" }),
-    },
-    {
-      label: "Ignorados",
-      value: policyCounts.ignored,
-      color: "text-[var(--status-neutral-fg)]",
-      href: filesPath({ status: "ignored" }),
-    },
-  ];
+  const kpiCards = useMemo(() => {
+    if (!insights) {
+      return [];
+    }
+    return [
+      { label: "Arquivos totais", value: total, color: "text-[var(--foreground)]", href: "/files" as const },
+      {
+        label: "Pipeline OK (política)",
+        value: insights.pipeline_completed_count ?? 0,
+        color: "text-[var(--status-success-fg)]",
+        href: filesPathPipelineCompleted(),
+      },
+      {
+        label: "Em processamento",
+        value: (stats?.downloading ?? 0) + (stats?.converting_csv ?? 0) + (stats?.converting_parquet ?? 0),
+        color: "text-[var(--status-info-fg)]",
+        href: filesPathMultiStatus(["downloading", "converting_csv", "converting_parquet"]),
+      },
+      { label: "Falhas", value: stats?.failed ?? 0, color: "text-[var(--status-danger-fg)]", href: filesPath({ status: "failed" }) },
+      {
+        label: "Pendentes",
+        value: policyCounts.pending,
+        color: "text-[var(--status-warning-fg)]",
+        href: filesPath({ status: "pending" }),
+      },
+      {
+        label: "Ignorados",
+        value: policyCounts.ignored,
+        color: "text-[var(--status-neutral-fg)]",
+        href: filesPath({ status: "ignored" }),
+      },
+    ];
+  }, [insights, total, stats, policyCounts]);
 
   return (
     <main className="min-h-screen p-6">
@@ -147,6 +152,26 @@ export default function DashboardPage() {
           </p>
         )}
 
+        {initialized && insights && insights.status_stage_mismatch_count > 0 && (
+          <p className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-[var(--status-warning-fg)]">
+            Há {insights.status_stage_mismatch_count.toLocaleString("pt-BR")} arquivo(s) em que o status agregado
+            (overall_status) não bate com as etapas registradas (file_stages) para o terminal esperado pela política.
+            {" "}
+            <Link href="/files" className="text-[var(--accent)] underline underline-offset-2">
+              Abrir lista de arquivos
+            </Link>
+            {" "}e compare o detalhe de cada arquivo.
+          </p>
+        )}
+
+        {initialized && insights &&
+          (insights.by_catalog_total_mismatch !== 0 || insights.by_state_total_mismatch !== 0) && (
+          <p className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-[var(--status-warning-fg)]">
+            Divergência de totais: catálogo {insights.by_catalog_total_mismatch.toLocaleString("pt-BR")}, estado{" "}
+            {insights.by_state_total_mismatch.toLocaleString("pt-BR")} (soma dos buckets vs total_files). Verifique dados agregados.
+          </p>
+        )}
+
         {/* KPI cards */}
         {!initialized ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-8">
@@ -156,7 +181,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-8">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-3">
             {kpiCards.map((card) => (
               <Link key={card.label} href={card.href} className="glass-card rounded-2xl p-4 hover:ring-1 hover:ring-[var(--accent)] transition">
                 <p className="text-sm text-[var(--muted)]">{card.label}</p>
@@ -164,10 +189,27 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+          {insights?.stage_done_counts ? (
+            <p className="mb-8 text-[11px] leading-relaxed text-[var(--muted)]">
+              Etapas concluídas no registro (file_stages): download{" "}
+              {insights.stage_done_counts.download.toLocaleString("pt-BR")}, CSV{" "}
+              {insights.stage_done_counts.csv_conversion.toLocaleString("pt-BR")}, Parquet{" "}
+              {insights.stage_done_counts.parquet_conversion.toLocaleString("pt-BR")}.
+            </p>
+          ) : (
+            <div className="mb-8" />
+          )}
           </>
         )}
 
-        {/* Stage breakdown */}
+        {/* Stage breakdown — overall_status only */}
+        <div className="mb-2">
+          <h2 className="text-sm font-medium text-[var(--foreground)]">Funil por status agregado</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Contagens abaixo usam apenas <span className="font-mono text-[11px]">overall_status</span> do arquivo — não são o
+            mesmo critério do cartão “Pipeline OK (política)”, que usa etapas e a política global.
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-8">
           {[
             {
@@ -185,7 +227,11 @@ export default function DashboardPage() {
               value: (stats?.csv_ready ?? 0) + (stats?.converting_parquet ?? 0) + (stats?.parquet_ready ?? 0),
               href: filesPathMultiStatus(["csv_ready", "converting_parquet", "parquet_ready"]),
             },
-            { label: "Parquet pronto", value: stats?.parquet_ready ?? 0, href: filesPath({ status: "parquet_ready" }) },
+            {
+              label: "Parquet pronto",
+              value: stats?.parquet_ready ?? 0,
+              href: filesPath({ status: "parquet_ready" }),
+            },
           ].map((s) => (
             <Link key={s.label} href={s.href} className="glass-card rounded-2xl p-4 hover:ring-1 hover:ring-[var(--accent)] transition">
               <p className="text-sm text-[var(--muted)]">{s.label}</p>
