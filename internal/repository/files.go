@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -463,146 +464,105 @@ func (r *FileRepository) ListSnapshotByFTPDir(ctx context.Context, dir string) (
 }
 
 // BulkUpsertResult reports the outcome of a BulkUpsertFromFTP call.
+// IDs, IsNew are aligned with the input slice order.
 type BulkUpsertResult struct {
-	IDs            []string
-	IsNew          []bool
-	ContentChanged []bool
+	IDs   []string
+	IsNew []bool
 }
 
 // BulkUpsertFromFTP inserts or updates many rows discovered during an FTP scan
-// using one round trip. Semantics match UpsertFromFTP per row: ON CONFLICT on
-// the unique filename, content_changed reflects a difference in size or
-// remote_timestamp.
+// using one round trip. ON CONFLICT on the unique filename mirrors UpsertFromFTP.
+// Whether the remote content actually changed is determined by the caller in
+// the in-memory diff phase, so it is not recomputed here.
 func (r *FileRepository) BulkUpsertFromFTP(ctx context.Context, params []UpsertFTPParams) (BulkUpsertResult, error) {
 	if len(params) == 0 {
 		return BulkUpsertResult{}, nil
 	}
 
-	filenames := make([]string, len(params))
-	catalogs := make([]string, len(params))
-	states := make([]string, len(params))
-	years := make([]int32, len(params))
-	months := make([]int32, len(params))
-	segments := make([]*string, len(params))
-	ftpDirs := make([]string, len(params))
-	ftpPaths := make([]string, len(params))
-	sizes := make([]*int64, len(params))
-	checksums := make([]*string, len(params))
-	timestamps := make([]*time.Time, len(params))
-	roots := make([]string, len(params))
-
+	const cols = 12
+	args := make([]any, 0, cols*len(params))
+	var sb strings.Builder
+	sb.Grow(256 + 96*len(params))
+	sb.WriteString(`INSERT INTO files (filename, catalog, state, year, month, segment,
+		                   ftp_dir, ftp_path, size_bytes, remote_checksum,
+		                   remote_timestamp, root_path, last_seen_at)
+		VALUES `)
 	for i, p := range params {
-		filenames[i] = p.Filename
-		catalogs[i] = p.Catalog
-		states[i] = p.State
-		years[i] = int32(p.Year)
-		months[i] = int32(p.Month)
-		segments[i] = p.Segment
-		ftpDirs[i] = p.FTPDir
-		ftpPaths[i] = p.FTPPath
-		sizes[i] = p.SizeBytes
-		checksums[i] = p.RemoteChecksum
-		timestamps[i] = p.RemoteTimestamp
-		roots[i] = p.RootPath
-	}
-
-	const q = `
-		WITH input AS (
-			SELECT *
-			FROM unnest(
-				$1::text[],   $2::text[], $3::text[], $4::int[], $5::int[],
-				$6::text[],   $7::text[], $8::text[], $9::bigint[],
-				$10::text[],  $11::timestamptz[], $12::text[]
-			) AS t(filename, catalog, state, year, month, segment,
-			       ftp_dir, ftp_path, size_bytes, remote_checksum,
-			       remote_timestamp, root_path)
-		),
-		upsert AS (
-			INSERT INTO files (filename, catalog, state, year, month, segment,
-			                   ftp_dir, ftp_path, size_bytes, remote_checksum,
-			                   remote_timestamp, root_path, last_seen_at)
-			SELECT filename, catalog, state, year, month,
-			       NULLIF(segment, ''),
-			       ftp_dir, ftp_path, size_bytes, remote_checksum,
-			       remote_timestamp, root_path, now()
-			FROM input
-			ON CONFLICT (filename) DO UPDATE
-			   SET ftp_path         = EXCLUDED.ftp_path,
-			       size_bytes       = EXCLUDED.size_bytes,
-			       remote_checksum  = EXCLUDED.remote_checksum,
-			       remote_timestamp = EXCLUDED.remote_timestamp,
-			       segment          = EXCLUDED.segment,
-			       last_seen_at     = now(),
-			       updated_at       = now()
-			RETURNING id, filename, (xmax = 0) AS is_new,
-			          (remote_checksum IS DISTINCT FROM (SELECT remote_checksum FROM input WHERE input.filename = files.filename)
-			            OR remote_timestamp IS DISTINCT FROM (SELECT remote_timestamp FROM input WHERE input.filename = files.filename)
-			          ) AS content_changed
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteByte('(')
+		base := i * cols
+		for j := 0; j < cols; j++ {
+			if j > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteByte('$')
+			sb.WriteString(strconv.Itoa(base + j + 1))
+		}
+		sb.WriteString(",now())")
+		var seg any
+		if p.Segment != nil && strings.TrimSpace(*p.Segment) != "" {
+			seg = *p.Segment
+		}
+		var size any
+		if p.SizeBytes != nil {
+			size = *p.SizeBytes
+		}
+		var checksum any
+		if p.RemoteChecksum != nil {
+			checksum = *p.RemoteChecksum
+		}
+		var ts any
+		if p.RemoteTimestamp != nil {
+			ts = *p.RemoteTimestamp
+		}
+		args = append(args,
+			p.Filename, p.Catalog, p.State, p.Year, p.Month,
+			seg, p.FTPDir, p.FTPPath, size,
+			checksum, ts, p.RootPath,
 		)
-		SELECT id, filename, is_new, content_changed FROM upsert`
+	}
+	sb.WriteString(`
+		ON CONFLICT (filename) DO UPDATE
+		   SET ftp_path         = EXCLUDED.ftp_path,
+		       size_bytes       = EXCLUDED.size_bytes,
+		       remote_checksum  = EXCLUDED.remote_checksum,
+		       remote_timestamp = EXCLUDED.remote_timestamp,
+		       segment          = EXCLUDED.segment,
+		       last_seen_at     = now(),
+		       updated_at       = now()
+		RETURNING id, filename, (xmax = 0) AS is_new`)
 
-	segArg := make([]string, len(segments))
-	for i, s := range segments {
-		if s != nil {
-			segArg[i] = *s
-		}
-	}
-
-	chksArg := make([]any, len(checksums))
-	for i, s := range checksums {
-		if s == nil {
-			chksArg[i] = nil
-		} else {
-			chksArg[i] = *s
-		}
-	}
-	tsArg := make([]any, len(timestamps))
-	for i, t := range timestamps {
-		if t == nil {
-			tsArg[i] = nil
-		} else {
-			tsArg[i] = *t
-		}
-	}
-	sizeArg := make([]any, len(sizes))
-	for i, s := range sizes {
-		if s == nil {
-			sizeArg[i] = nil
-		} else {
-			sizeArg[i] = *s
-		}
-	}
-
-	rows, err := r.db.Query(ctx, q,
-		filenames, catalogs, states, years, months,
-		segArg, ftpDirs, ftpPaths, sizeArg,
-		chksArg, tsArg, roots,
-	)
+	rows, err := r.db.Query(ctx, sb.String(), args...)
 	if err != nil {
 		return BulkUpsertResult{}, fmt.Errorf("bulk upsert files: %w", err)
 	}
 	defer rows.Close()
 
-	out := BulkUpsertResult{
-		IDs:            make([]string, 0, len(params)),
-		IsNew:          make([]bool, 0, len(params)),
-		ContentChanged: make([]bool, 0, len(params)),
-	}
 	type row struct {
-		id, filename string
-		isNew        bool
-		changed      bool
+		id    string
+		isNew bool
 	}
 	byName := make(map[string]row, len(params))
 	for rows.Next() {
-		var rr row
-		if err := rows.Scan(&rr.id, &rr.filename, &rr.isNew, &rr.changed); err != nil {
+		var (
+			id       string
+			filename string
+			isNew    bool
+		)
+		if err := rows.Scan(&id, &filename, &isNew); err != nil {
 			return BulkUpsertResult{}, err
 		}
-		byName[rr.filename] = rr
+		byName[filename] = row{id: id, isNew: isNew}
 	}
 	if err := rows.Err(); err != nil {
 		return BulkUpsertResult{}, err
+	}
+
+	out := BulkUpsertResult{
+		IDs:   make([]string, 0, len(params)),
+		IsNew: make([]bool, 0, len(params)),
 	}
 	for _, p := range params {
 		rr, ok := byName[p.Filename]
@@ -611,7 +571,6 @@ func (r *FileRepository) BulkUpsertFromFTP(ctx context.Context, params []UpsertF
 		}
 		out.IDs = append(out.IDs, rr.id)
 		out.IsNew = append(out.IsNew, rr.isNew)
-		out.ContentChanged = append(out.ContentChanged, rr.isNew || rr.changed)
 	}
 	return out, nil
 }

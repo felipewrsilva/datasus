@@ -38,6 +38,32 @@ var (
 		Help: "Total files enqueued for download after FTP scans.",
 	})
 
+	FTPScanPhaseDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "datasus_ftp_scan_phase_seconds",
+		Help:    "Time spent in each FTP scan phase.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
+	}, []string{"phase"})
+
+	FTPScanFilesUnchanged = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_ftp_scan_files_unchanged_total",
+		Help: "Total .dbc files seen in FTP scans that already matched the catalog snapshot.",
+	})
+
+	FTPScanFilesChanged = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_ftp_scan_files_changed_total",
+		Help: "Total .dbc files updated during FTP scans because remote size or timestamp changed.",
+	})
+
+	FTPScanFilesInserted = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_ftp_scan_files_inserted_total",
+		Help: "Total .dbc files inserted into the catalog by FTP scans.",
+	})
+
+	FTPScanDBRoundtrips = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_ftp_scan_db_roundtrips_total",
+		Help: "Total database round trips performed by FTP scans (snapshot, bulk upsert, batch enqueue, etc.).",
+	})
+
 	PolicySyncRunsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "datasus_policy_sync_runs_total",
 		Help: "Total policy-driven local filesystem synchronization runs.",

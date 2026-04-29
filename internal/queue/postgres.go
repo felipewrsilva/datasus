@@ -171,6 +171,44 @@ func (q *PostgresQueue) Enqueue(ctx context.Context, fileID string, stage domain
 	return nil
 }
 
+// EnqueueItem describes a single queue insertion in BulkEnqueue.
+type EnqueueItem struct {
+	FileID      string
+	Stage       domain.StageName
+	AvailableAt time.Time
+}
+
+// BulkEnqueue inserts many jobs in one round trip with the same idempotent
+// semantics as Enqueue: only pending/done/failed rows get reset; running rows
+// are left alone.
+func (q *PostgresQueue) BulkEnqueue(ctx context.Context, items []EnqueueItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	fileIDs := make([]string, len(items))
+	stages := make([]string, len(items))
+	avails := make([]time.Time, len(items))
+	for i, it := range items {
+		fileIDs[i] = it.FileID
+		stages[i] = string(it.Stage)
+		avails[i] = it.AvailableAt
+	}
+	_, err := q.db.Exec(ctx, `
+		INSERT INTO job_queue (file_id, stage, status, available_at)
+		SELECT file_id, stage::stage_name, 'pending', avail
+		FROM unnest($1::uuid[], $2::text[], $3::timestamptz[])
+		    AS t(file_id, stage, avail)
+		ON CONFLICT (file_id, stage) DO UPDATE
+		    SET status='pending', available_at=EXCLUDED.available_at,
+		        locked_at=NULL, locked_by=NULL, attempts=0, updated_at=now()
+		    WHERE job_queue.status IN ('failed', 'done', 'pending')`,
+		fileIDs, stages, avails)
+	if err != nil {
+		return fmt.Errorf("bulk enqueue: %w", err)
+	}
+	return nil
+}
+
 func (q *PostgresQueue) DepthByStageStatus(ctx context.Context) ([]DepthEntry, error) {
 	rows, err := q.db.Query(ctx, `
 		SELECT stage, status, COUNT(*)::float8

@@ -49,9 +49,11 @@ func main() {
 		cfg.RetryBaseDelay, cfg.RetryMaxDelay, cfg.StuckJobTimeout, log)
 
 	ftpClient := ftp.NewClient(cfg.FTPHost, cfg.FTPConnPool)
+	ftpClient.SetVerifyNoOp(cfg.FTPPoolNoOp)
 	defer ftpClient.Close()
 
 	scanner := ftp.NewScanner(ftpClient, cfg.FTPPaths, fileRepo, stageRepo, q, policyRepo, cfg.StorageRoot, log)
+	scanner.Configure(cfg.FTPScanBatchSize, cfg.FTPScanLegacy)
 	scanManager := ftp.NewScanManager(scanner, logRepo, policyRepo, log, cfg.CronSchedule, cfg.FTPScanTimeout)
 	if err := scanManager.Start(ctx); err != nil {
 		log.Error("failed to start ftp scan manager", "err", err)

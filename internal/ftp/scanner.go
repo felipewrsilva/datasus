@@ -23,6 +23,8 @@ type Scanner struct {
 	policy    *repository.PolicyRepository
 	rootPath  string
 	log       *slog.Logger
+	batchSize int
+	legacy    bool
 }
 
 func NewScanner(
@@ -44,7 +46,18 @@ func NewScanner(
 		policy:    policy,
 		rootPath:  rootPath,
 		log:       log,
+		batchSize: 1000,
 	}
+}
+
+// Configure tunes batch behavior and selects between the batched pipeline
+// (default) and the legacy per-file path. Safe to call before Scan; ignored
+// when called concurrently with a running scan.
+func (s *Scanner) Configure(batchSize int, legacy bool) {
+	if batchSize > 0 {
+		s.batchSize = batchSize
+	}
+	s.legacy = legacy
 }
 
 type ScanResult struct {
@@ -67,19 +80,29 @@ func (s *Scanner) Scan(ctx context.Context, paths []string) ([]ScanResult, error
 
 	var results []ScanResult
 	for _, dir := range dirs {
-		r, err := s.scanDir(ctx, dir)
+		var (
+			r   ScanResult
+			err error
+		)
+		if s.legacy {
+			r, err = s.scanDirLegacy(ctx, dir)
+		} else {
+			r, err = s.scanDirBatch(ctx, dir)
+		}
 		if err != nil {
 			return results, fmt.Errorf("scan dir %q: %w", dir, err)
 		}
 		results = append(results, r)
 		s.log.Info("scan complete",
 			"dir", dir, "found", r.Found, "new", r.New,
-			"changed", r.Changed, "enqueued", r.Enqueued)
+			"changed", r.Changed, "enqueued", r.Enqueued,
+			"unchanged", r.Skipped, "skipped_by_policy", r.SkippedByPolicy,
+			"errors", len(r.Errors))
 	}
 	return results, nil
 }
 
-func (s *Scanner) scanDir(ctx context.Context, dir string) (ScanResult, error) {
+func (s *Scanner) scanDirLegacy(ctx context.Context, dir string) (ScanResult, error) {
 	result := ScanResult{Dir: dir}
 	entries, err := s.client.ListDir(ctx, dir)
 	if err != nil {

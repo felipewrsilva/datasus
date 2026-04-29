@@ -92,6 +92,24 @@ func (r *StageRepository) InitStages(ctx context.Context, fileID string) error {
 	return err
 }
 
+// BulkInitStages creates pending file_stage rows for many files in one round trip.
+// Idempotent thanks to the unique (file_id, stage) constraint.
+func (r *StageRepository) BulkInitStages(ctx context.Context, fileIDs []string) error {
+	if len(fileIDs) == 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO file_stages (file_id, stage, status)
+		SELECT f.id, s.stage::stage_name, 'pending'::stage_status
+		FROM unnest($1::uuid[]) AS f(id)
+		CROSS JOIN (VALUES ('download'), ('csv_conversion'), ('parquet_conversion')) AS s(stage)
+		ON CONFLICT (file_id, stage) DO NOTHING`, fileIDs)
+	if err != nil {
+		return fmt.Errorf("bulk init stages: %w", err)
+	}
+	return nil
+}
+
 func (r *StageRepository) SetRunning(ctx context.Context, fileID string, stage domain.StageName) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE file_stages

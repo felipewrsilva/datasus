@@ -9,29 +9,32 @@ import (
 )
 
 type Config struct {
-	FTPHost         string
-	FTPPaths        []string
-	FTPConnPool     int
-	PauseDownloads  bool
-	DatabaseURL     string
-	StorageRoot     string
-	CronSchedule    string
-	FTPScanTimeout  time.Duration
-	DownloadWorkers int
-	CSVWorkers      int
-	ParquetWorkers  int
-	RetryBaseDelay  time.Duration
-	RetryMaxDelay   time.Duration
-	StuckJobTimeout time.Duration
-	CSVTimeout      time.Duration
-	ParquetTimeout  time.Duration
-	ParquetNP       int
-	ParquetRowGroup int
-	ParquetPageKB   int
-	ParquetProgress int
-	LogLevel        string
-	APIPort         int
-	WorkerID        string
+	FTPHost          string
+	FTPPaths         []string
+	FTPConnPool      int
+	FTPPoolNoOp      bool
+	FTPScanBatchSize int
+	FTPScanLegacy    bool
+	PauseDownloads   bool
+	DatabaseURL      string
+	StorageRoot      string
+	CronSchedule     string
+	FTPScanTimeout   time.Duration
+	DownloadWorkers  int
+	CSVWorkers       int
+	ParquetWorkers   int
+	RetryBaseDelay   time.Duration
+	RetryMaxDelay    time.Duration
+	StuckJobTimeout  time.Duration
+	CSVTimeout       time.Duration
+	ParquetTimeout   time.Duration
+	ParquetNP        int
+	ParquetRowGroup  int
+	ParquetPageKB    int
+	ParquetProgress  int
+	LogLevel         string
+	APIPort          int
+	WorkerID         string
 }
 
 // Load reads configuration from environment variables.
@@ -52,8 +55,12 @@ func Load() (*Config, error) {
 	}
 
 	c.FTPConnPool = intEnv("FTP_CONN_POOL", 2)
-	// Downloads should run by default in local/dev environments.
-	// Set PAUSE_DOWNLOADS=true only when intentionally freezing enqueue.
+	c.FTPPoolNoOp = boolEnv("FTP_POOL_NOOP", true)
+	c.FTPScanBatchSize = intEnv("FTP_SCAN_BATCH_SIZE", 1000)
+	if c.FTPScanBatchSize <= 0 {
+		c.FTPScanBatchSize = 1000
+	}
+	c.FTPScanLegacy = boolEnv("FTP_SCAN_LEGACY", false)
 	c.PauseDownloads = boolEnv("PAUSE_DOWNLOADS", false)
 	c.DatabaseURL = requireEnv("DATABASE_URL")
 	c.StorageRoot = requireEnv("STORAGE_ROOT")

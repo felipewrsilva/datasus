@@ -21,14 +21,24 @@ type Entry struct {
 
 // Client wraps a pool of FTP connections.
 type Client struct {
-	host    string
-	size    int
-	mu      sync.Mutex
-	pool    []*goftp.ServerConn
+	host       string
+	size       int
+	verifyNoOp bool
+	mu         sync.Mutex
+	pool       []*goftp.ServerConn
 }
 
 func NewClient(host string, poolSize int) *Client {
-	return &Client{host: host, size: poolSize}
+	return &Client{host: host, size: poolSize, verifyNoOp: true}
+}
+
+// SetVerifyNoOp toggles the keep-alive NoOp roundtrip used to validate pooled
+// connections on acquire. Disable when the pool is only used for short LISTs
+// to avoid an extra network round trip per acquire.
+func (c *Client) SetVerifyNoOp(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.verifyNoOp = enabled
 }
 
 func normalizeFTPAddress(host string) string {
@@ -44,11 +54,14 @@ func normalizeFTPAddress(host string) string {
 // acquire borrows a connection from the pool or dials a new one.
 func (c *Client) acquire(ctx context.Context) (*goftp.ServerConn, error) {
 	c.mu.Lock()
+	verifyNoOp := c.verifyNoOp
 	if len(c.pool) > 0 {
 		conn := c.pool[len(c.pool)-1]
 		c.pool = c.pool[:len(c.pool)-1]
 		c.mu.Unlock()
-		// Verify connection is still alive
+		if !verifyNoOp {
+			return conn, nil
+		}
 		if err := conn.NoOp(); err == nil {
 			return conn, nil
 		}
@@ -81,6 +94,14 @@ func (c *Client) dial(ctx context.Context) (*goftp.ServerConn, error) {
 	}()
 	select {
 	case <-ctx.Done():
+		// Avoid leaking the dial goroutine: drain the channel in the background
+		// and quit the connection if it eventually completes successfully.
+		go func() {
+			r := <-ch
+			if r.conn != nil {
+				_ = r.conn.Quit()
+			}
+		}()
 		return nil, ctx.Err()
 	case r := <-ch:
 		return r.conn, r.err
