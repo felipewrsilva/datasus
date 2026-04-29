@@ -79,7 +79,13 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	_ = s.stageRepo.SetRunning(ctx, file.ID, domain.StageCSVConversion)
 	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusConvertingCSV)
 
-	csvPath := storage.CSVPath(file.RootPath, file.Catalog, file.State, file.Year, file.Month, file.Filename)
+	csvRoot := file.RootPath
+	if s.policy != nil {
+		if dirs, dirErr := s.policy.ProcessingDirectories(ctx); dirErr == nil {
+			csvRoot = storage.ResolveDirectory(dirs.CSVDir, csvRoot)
+		}
+	}
+	csvPath := storage.CSVPath(csvRoot, file.Catalog, file.State, file.Year, file.Month, file.Filename)
 	if err := storage.EnsureDir(csvPath); err != nil {
 		status = "failure"
 		return s.fail(ctx, file, fmt.Errorf("ensure dir: %w", err))

@@ -9,11 +9,16 @@ import (
 
 // PoliciesHandler serves GET/PUT download policy configuration.
 type PoliciesHandler struct {
-	repo *repository.PolicyRepository
+	repo       *repository.PolicyRepository
+	syncRunner interface {
+		Trigger(reason, actor string)
+	}
 }
 
-func NewPoliciesHandler(repo *repository.PolicyRepository) *PoliciesHandler {
-	return &PoliciesHandler{repo: repo}
+func NewPoliciesHandler(repo *repository.PolicyRepository, syncRunner interface {
+	Trigger(reason, actor string)
+}) *PoliciesHandler {
+	return &PoliciesHandler{repo: repo, syncRunner: syncRunner}
 }
 
 func (h *PoliciesHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -27,9 +32,10 @@ func (h *PoliciesHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // putBody is the shape for PUT /api/policies.
 type putBody struct {
-	SelectedCatalogs []string                    `json:"selected_catalogs"`
-	SelectedPeriods  repository.PolicyPeriods    `json:"selected_periods"`
-	Processing       repository.ProcessingStages `json:"processing"`
+	SelectedCatalogs []string                         `json:"selected_catalogs"`
+	SelectedPeriods  repository.PolicyPeriods         `json:"selected_periods"`
+	Processing       repository.ProcessingStages      `json:"processing"`
+	Directories      repository.ProcessingDirectories `json:"directories"`
 }
 
 func (h *PoliciesHandler) Put(w http.ResponseWriter, r *http.Request) {
@@ -42,9 +48,13 @@ func (h *PoliciesHandler) Put(w http.ResponseWriter, r *http.Request) {
 		SelectedCatalogs: body.SelectedCatalogs,
 		SelectedPeriods:  body.SelectedPeriods,
 		Processing:       body.Processing,
+		Directories:      body.Directories,
 	}); err != nil {
 		jsonError(w, err, 400)
 		return
+	}
+	if h.syncRunner != nil {
+		h.syncRunner.Trigger("policy_saved", "api")
 	}
 	policy, err := h.repo.GetPolicies(r.Context())
 	if err != nil {

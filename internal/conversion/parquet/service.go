@@ -79,7 +79,13 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	_ = s.stageRepo.SetRunning(ctx, file.ID, domain.StageParquetConversion)
 	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusConvertingParquet)
 
-	parquetPath := storage.ParquetPath(file.RootPath, file.Catalog, file.State, file.Year, file.Month, file.Filename)
+	parquetRoot := file.RootPath
+	if s.policy != nil {
+		if dirs, dirErr := s.policy.ProcessingDirectories(ctx); dirErr == nil {
+			parquetRoot = storage.ResolveDirectory(dirs.ParquetDir, parquetRoot)
+		}
+	}
+	parquetPath := storage.ParquetPath(parquetRoot, file.Catalog, file.State, file.Year, file.Month, file.Filename)
 	if err := storage.EnsureDir(parquetPath); err != nil {
 		status = "failure"
 		return s.fail(ctx, file, fmt.Errorf("ensure dir: %w", err))

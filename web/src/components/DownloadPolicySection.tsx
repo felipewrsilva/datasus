@@ -25,6 +25,45 @@ function keyFor(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
+function normalizePolicyPathInput(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  const looksWindows =
+    /^[a-zA-Z]:/.test(value) || value.startsWith("//") || value.startsWith("\\\\") || value.includes("\\");
+  if (!looksWindows) return value;
+  let normalized = value.replaceAll("/", "\\");
+  if (normalized.startsWith("\\\\")) {
+    const rest = normalized.replace(/^\\+/, "");
+    normalized = `\\\\${rest}`;
+  }
+  normalized = normalized.replace(/\\{2,}/g, "\\");
+  if (value.startsWith("//") || value.startsWith("\\\\")) {
+    normalized = `\\\\${normalized.replace(/^\\+/, "")}`;
+  }
+  const isDriveRoot = /^[a-zA-Z]:\\$/.test(normalized);
+  if (!isDriveRoot) normalized = normalized.replace(/\\+$/g, "");
+  return normalized;
+}
+
+function validatePolicyPath(value: string): string | null {
+  if (!value) return null;
+  const windowsLike = /^[a-zA-Z]:/.test(value) || value.startsWith("\\\\");
+  if (windowsLike) {
+    if (value.includes("/")) return "Use barras invertidas para caminhos Windows.";
+    if (/^[a-zA-Z]:[^\\]/.test(value)) return "Formato inválido. Use C:\\pasta.";
+    if (value.startsWith("\\\\")) {
+      const parts = value.replace(/^\\\\/, "").split("\\");
+      if (parts.length < 2 || !parts[0] || !parts[1]) return "Caminho de rede inválido.";
+    } else if (!/^[a-zA-Z]:\\/.test(value)) {
+      return "Caminho local inválido.";
+    }
+    if (/[*?"<>|]/.test(value)) return "Caminho contém caracteres inválidos.";
+    return null;
+  }
+  if (!value.startsWith("/")) return "Formato inválido.";
+  return null;
+}
+
 export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
   const [enableDownload, setEnableDownload] = useState(true);
   const [enableCSV, setEnableCSV] = useState(true);
@@ -38,7 +77,13 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
   const [query, setQuery] = useState("");
   const [expandedYears, setExpandedYears] = useState<Record<number, boolean>>({});
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [downloadDir, setDownloadDir] = useState("");
+  const [csvDir, setCSVDir] = useState("");
+  const [parquetDir, setParquetDir] = useState("");
+  const [pathErrors, setPathErrors] = useState<{ download?: string; csv?: string; parquet?: string }>({});
+  const [savedSnapshot, setSavedSnapshot] = useState("");
 
   const availableMonthSet = useMemo(
     () => new Set(availablePeriodMonths.map((item) => keyFor(item.year, item.month))),
@@ -51,8 +96,30 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
+    const buildSnapshot = (policy: Parameters<typeof putPolicies>[0]) => JSON.stringify(policy);
+    const buildPayloadFromState = (p: Awaited<ReturnType<typeof getPolicies>>): Parameters<typeof putPolicies>[0] => ({
+      selected_catalogs: [...(p.selected_catalogs ?? [])].map((c) => c.toUpperCase()).sort(),
+      selected_periods: {
+        years: [...(p.selected_periods?.years ?? [])].map((y) => Number(y)).filter((y) => Number.isFinite(y)).sort((a, b) => a - b),
+        months: [...(p.selected_periods?.months ?? [])]
+          .map((m) => ({ year: Number(m.year), month: Number(m.month) }))
+          .filter((m) => Number.isFinite(m.year) && Number.isFinite(m.month) && m.month >= 1 && m.month <= 12)
+          .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year)),
+      },
+      processing: {
+        enable_download: p.processing?.enable_download ?? true,
+        enable_csv: p.processing?.enable_csv ?? true,
+        enable_parquet: p.processing?.enable_parquet ?? true,
+      },
+      directories: {
+        download_dir: p.directories?.download_dir,
+        csv_dir: p.directories?.csv_dir,
+        parquet_dir: p.directories?.parquet_dir,
+      },
+    });
     void (async () => {
       try {
+        setLoading(true);
         const p = await getPolicies();
         if (cancelled) return;
         setAvailablePeriodYears((p.available_periods?.years ?? []).map((y) => Number(y)).filter((y) => Number.isFinite(y)));
@@ -75,9 +142,15 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
           }
         }
         setSelectedMonths(monthKeys);
+        setDownloadDir(p.directories?.download_dir ?? "");
+        setCSVDir(p.directories?.csv_dir ?? "");
+        setParquetDir(p.directories?.parquet_dir ?? "");
+        setSavedSnapshot(buildSnapshot(buildPayloadFromState(p)));
       } catch (e) {
         if (cancelled) return;
         setLoadErr(e instanceof Error ? e.message : "Falha ao carregar políticas");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -205,6 +278,11 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
           enable_csv: enableCSV,
           enable_parquet: enableParquet,
         },
+        directories: {
+          download_dir: downloadDir.trim() || undefined,
+          csv_dir: csvDir.trim() || undefined,
+          parquet_dir: parquetDir.trim() || undefined,
+        },
       });
       const updatedAvailableMonths = (updated.available_periods?.months ?? []).filter((ym) =>
         Number.isFinite(ym.year) && Number.isFinite(ym.month) && ym.month >= 1 && ym.month <= 12,
@@ -226,6 +304,30 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
       setEnableDownload(updated.processing?.enable_download ?? true);
       setEnableCSV(updated.processing?.enable_csv ?? true);
       setEnableParquet(updated.processing?.enable_parquet ?? true);
+      setDownloadDir(updated.directories?.download_dir ?? "");
+      setCSVDir(updated.directories?.csv_dir ?? "");
+      setParquetDir(updated.directories?.parquet_dir ?? "");
+      setSavedSnapshot(
+        JSON.stringify({
+          selected_catalogs: (updated.selected_catalogs ?? []).map((c) => c.toUpperCase()).sort(),
+          selected_periods: {
+            years: (updated.selected_periods?.years ?? []).map((y) => Number(y)).sort((a, b) => a - b),
+            months: (updated.selected_periods?.months ?? [])
+              .map((m) => ({ year: Number(m.year), month: Number(m.month) }))
+              .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year)),
+          },
+          processing: {
+            enable_download: updated.processing?.enable_download ?? true,
+            enable_csv: updated.processing?.enable_csv ?? true,
+            enable_parquet: updated.processing?.enable_parquet ?? true,
+          },
+          directories: {
+            download_dir: updated.directories?.download_dir,
+            csv_dir: updated.directories?.csv_dir,
+            parquet_dir: updated.directories?.parquet_dir,
+          },
+        }),
+      );
       onSaved?.();
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : "Falha ao salvar");
@@ -239,7 +341,31 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
     catalog.toLowerCase().includes(query.trim().toLowerCase()),
   );
   const hasSelectedPeriod = selectedYears.size > 0 || selectedMonths.size > 0;
-  const canSave = !saving;
+  const currentPayloadSnapshot = JSON.stringify({
+    selected_catalogs: Array.from(selectedCatalogs).sort(),
+    selected_periods: {
+      years: Array.from(selectedYears).sort((a, b) => a - b),
+      months: Array.from(selectedMonths)
+        .map((k) => {
+          const [year, month] = k.split("-").map(Number);
+          return { year, month };
+        })
+        .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year)),
+    },
+    processing: {
+      enable_download: enableDownload,
+      enable_csv: enableCSV,
+      enable_parquet: enableParquet,
+    },
+    directories: {
+      download_dir: downloadDir.trim() || undefined,
+      csv_dir: csvDir.trim() || undefined,
+      parquet_dir: parquetDir.trim() || undefined,
+    },
+  });
+  const hasPathErrors = Boolean(pathErrors.download || pathErrors.csv || pathErrors.parquet);
+  const isDirty = savedSnapshot !== "" && currentPayloadSnapshot !== savedSnapshot;
+  const canSave = !saving && !loading && isDirty && !hasPathErrors;
 
   const selectedCatalogLabels = Array.from(selectedCatalogs)
     .sort()
@@ -267,7 +393,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
           onClick={() => void save()}
           size="sm"
         >
-          {saving ? "Salvando..." : "Salvar configuração"}
+          {saving ? "Salvando..." : loading ? "Carregando..." : "Salvar configuração"}
         </Button>
       </div>
       {loadErr && (
@@ -313,8 +439,73 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
             </label>
           </div>
         </section>
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4 lg:col-span-2">
+          <h3 className="text-base font-semibold text-[var(--foreground)]">2. Diretórios de armazenamento</h3>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Opcional. Se vazio, o sistema mantém os diretórios padrão atuais.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <label className="text-sm text-[var(--foreground)]">
+              Pasta de Download
+              <input
+                type="text"
+                value={downloadDir}
+                onChange={(e) => {
+                  setDownloadDir(e.target.value);
+                  setPathErrors((prev) => ({ ...prev, download: undefined }));
+                }}
+                onBlur={() => {
+                  const normalized = normalizePolicyPathInput(downloadDir);
+                  setDownloadDir(normalized);
+                  setPathErrors((prev) => ({ ...prev, download: validatePolicyPath(normalized) ?? undefined }));
+                }}
+                placeholder="Padrão atual do sistema"
+                className="form-control mt-1 w-full rounded-xl px-3 py-2 text-sm"
+              />
+              {pathErrors.download && <span className="mt-1 block text-xs text-[var(--status-danger-fg)]">{pathErrors.download}</span>}
+            </label>
+            <label className="text-sm text-[var(--foreground)]">
+              Pasta de CSV
+              <input
+                type="text"
+                value={csvDir}
+                onChange={(e) => {
+                  setCSVDir(e.target.value);
+                  setPathErrors((prev) => ({ ...prev, csv: undefined }));
+                }}
+                onBlur={() => {
+                  const normalized = normalizePolicyPathInput(csvDir);
+                  setCSVDir(normalized);
+                  setPathErrors((prev) => ({ ...prev, csv: validatePolicyPath(normalized) ?? undefined }));
+                }}
+                placeholder="Padrão atual do sistema"
+                className="form-control mt-1 w-full rounded-xl px-3 py-2 text-sm"
+              />
+              {pathErrors.csv && <span className="mt-1 block text-xs text-[var(--status-danger-fg)]">{pathErrors.csv}</span>}
+            </label>
+            <label className="text-sm text-[var(--foreground)]">
+              Pasta de Parquet
+              <input
+                type="text"
+                value={parquetDir}
+                onChange={(e) => {
+                  setParquetDir(e.target.value);
+                  setPathErrors((prev) => ({ ...prev, parquet: undefined }));
+                }}
+                onBlur={() => {
+                  const normalized = normalizePolicyPathInput(parquetDir);
+                  setParquetDir(normalized);
+                  setPathErrors((prev) => ({ ...prev, parquet: validatePolicyPath(normalized) ?? undefined }));
+                }}
+                placeholder="Padrão atual do sistema"
+                className="form-control mt-1 w-full rounded-xl px-3 py-2 text-sm"
+              />
+              {pathErrors.parquet && <span className="mt-1 block text-xs text-[var(--status-danger-fg)]">{pathErrors.parquet}</span>}
+            </label>
+          </div>
+        </section>
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
-          <h3 className="text-base font-semibold text-[var(--foreground)]">2. Catálogos</h3>
+          <h3 className="text-base font-semibold text-[var(--foreground)]">3. Catálogos</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">Selecione ao menos um catálogo para o processamento poder rodar.</p>
           <input
             type="search"
@@ -346,7 +537,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         </section>
 
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
-          <h3 className="text-base font-semibold text-[var(--foreground)]">3. Período</h3>
+          <h3 className="text-base font-semibold text-[var(--foreground)]">4. Período</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">
             Marque o ano para incluir os 12 meses calendário ou escolha meses avulsos. Meses ainda sem arquivo na base
             podem ser marcados para liberar o processamento quando o dado aparecer.

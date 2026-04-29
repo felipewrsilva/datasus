@@ -37,4 +37,24 @@ var (
 		Name: "datasus_ftp_scan_files_enqueued_total",
 		Help: "Total files enqueued for download after FTP scans.",
 	})
+
+	PolicySyncRunsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_policy_sync_runs_total",
+		Help: "Total policy-driven local filesystem synchronization runs.",
+	})
+
+	PolicySyncFilesFound = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_policy_sync_files_found_total",
+		Help: "Total .dbc files found by policy local sync.",
+	})
+
+	PolicySyncFilesMapped = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_policy_sync_files_mapped_total",
+		Help: "Total .dbc files successfully mapped and cataloged by policy local sync.",
+	})
+
+	PolicySyncEnqueued = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "datasus_policy_sync_jobs_enqueued_total",
+		Help: "Total conversion jobs enqueued by policy local sync.",
+	})
 )

@@ -16,6 +16,7 @@ import (
 	"datasus/internal/config"
 	"datasus/internal/ftp"
 	"datasus/internal/observability"
+	"datasus/internal/policysync"
 	"datasus/internal/queue"
 	"datasus/internal/repository"
 )
@@ -56,10 +57,15 @@ func main() {
 		log.Error("failed to start ftp scan manager", "err", err)
 		os.Exit(1)
 	}
+	policySyncManager := policysync.NewManager(policyRepo, fileRepo, stageRepo, logRepo, q, log, cfg.StorageRoot)
+	if err := policySyncManager.Start(ctx); err != nil {
+		log.Error("failed to start policy local sync manager", "err", err)
+		os.Exit(1)
+	}
 
 	filesHandler := handlers.NewFilesHandler(fileRepo, stageRepo, logRepo, policyRepo)
 	actionsHandler := handlers.NewActionsHandler(scanManager, fileRepo, stageRepo, logRepo, q, policyRepo, cfg.PauseDownloads)
-	policiesHandler := handlers.NewPoliciesHandler(policyRepo)
+	policiesHandler := handlers.NewPoliciesHandler(policyRepo, policySyncManager)
 
 	router := api.NewRouter(filesHandler, actionsHandler, policiesHandler, log)
 

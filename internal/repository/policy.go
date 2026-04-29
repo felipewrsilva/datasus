@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"datasus/internal/domain"
+	"datasus/internal/storage"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,9 +50,20 @@ func (r *PolicyRepository) ensureGlobalPolicyTables(ctx context.Context) error {
 			id SMALLINT PRIMARY KEY CHECK (id = 1),
 			enable_download BOOLEAN NOT NULL DEFAULT TRUE,
 			enable_csv BOOLEAN NOT NULL DEFAULT TRUE,
-			enable_parquet BOOLEAN NOT NULL DEFAULT TRUE
+			enable_parquet BOOLEAN NOT NULL DEFAULT TRUE,
+			download_dir TEXT NULL,
+			csv_dir TEXT NULL,
+			parquet_dir TEXT NULL
 		)`); err != nil {
 		return fmt.Errorf("ensure processing_policy_config: %w", err)
+	}
+	if _, err := r.db.Exec(ctx, `
+		ALTER TABLE processing_policy_config
+			ADD COLUMN IF NOT EXISTS download_dir TEXT NULL,
+			ADD COLUMN IF NOT EXISTS csv_dir TEXT NULL,
+			ADD COLUMN IF NOT EXISTS parquet_dir TEXT NULL
+	`); err != nil {
+		return fmt.Errorf("ensure processing_policy_config columns: %w", err)
 	}
 	if _, err := r.db.Exec(ctx, `
 		INSERT INTO processing_policy_config (id, enable_download, enable_csv, enable_parquet)
@@ -86,13 +98,20 @@ type ProcessingStages struct {
 	EnableParquet  bool `json:"enable_parquet"`
 }
 
+type ProcessingDirectories struct {
+	DownloadDir *string `json:"download_dir,omitempty"`
+	CSVDir      *string `json:"csv_dir,omitempty"`
+	ParquetDir  *string `json:"parquet_dir,omitempty"`
+}
+
 // GlobalPolicy is the API shape for processing policy configuration.
 type GlobalPolicy struct {
-	AvailableCatalogs []string         `json:"available_catalogs"`
-	AvailablePeriods  AvailablePeriods `json:"available_periods"`
-	SelectedCatalogs  []string         `json:"selected_catalogs"`
-	SelectedPeriods   PolicyPeriods    `json:"selected_periods"`
-	Processing        ProcessingStages `json:"processing"`
+	AvailableCatalogs []string              `json:"available_catalogs"`
+	AvailablePeriods  AvailablePeriods      `json:"available_periods"`
+	SelectedCatalogs  []string              `json:"selected_catalogs"`
+	SelectedPeriods   PolicyPeriods         `json:"selected_periods"`
+	Processing        ProcessingStages      `json:"processing"`
+	Directories       ProcessingDirectories `json:"directories"`
 }
 
 func normalizeCatalog(c string) string {
@@ -209,11 +228,19 @@ func (r *PolicyRepository) GetPolicies(ctx context.Context) (GlobalPolicy, error
 		return GlobalPolicy{}, err
 	}
 	var processing ProcessingStages
+	var directories ProcessingDirectories
 	if err := r.db.QueryRow(ctx, `
-		SELECT enable_download, enable_csv, enable_parquet
+		SELECT enable_download, enable_csv, enable_parquet, download_dir, csv_dir, parquet_dir
 		FROM processing_policy_config
 		WHERE id = 1`,
-	).Scan(&processing.EnableDownload, &processing.EnableCSV, &processing.EnableParquet); err != nil {
+	).Scan(
+		&processing.EnableDownload,
+		&processing.EnableCSV,
+		&processing.EnableParquet,
+		&directories.DownloadDir,
+		&directories.CSVDir,
+		&directories.ParquetDir,
+	); err != nil {
 		return GlobalPolicy{}, fmt.Errorf("read processing policy config: %w", err)
 	}
 
@@ -225,7 +252,8 @@ func (r *PolicyRepository) GetPolicies(ctx context.Context) (GlobalPolicy, error
 			Years:  selectedYears,
 			Months: selectedMonths,
 		},
-		Processing: processing,
+		Processing:  processing,
+		Directories: directories,
 	}, nil
 }
 
@@ -263,6 +291,26 @@ func (r *PolicyRepository) ReplacePolicies(ctx context.Context, in GlobalPolicy)
 	}
 	if err := validateProcessingStages(in.Processing); err != nil {
 		return err
+	}
+	normalizedDirs, err := storage.NormalizePolicyDirectories(storage.ProcessingDirectories{
+		DownloadDir: in.Directories.DownloadDir,
+		CSVDir:      in.Directories.CSVDir,
+		ParquetDir:  in.Directories.ParquetDir,
+	})
+	if err != nil {
+		return err
+	}
+	for name, ptr := range map[string]*string{
+		"download_dir": normalizedDirs.DownloadDir,
+		"csv_dir":      normalizedDirs.CSVDir,
+		"parquet_dir":  normalizedDirs.ParquetDir,
+	} {
+		if ptr == nil {
+			continue
+		}
+		if err := storage.ValidateDirectoryAccess(*ptr, true); err != nil {
+			return fmt.Errorf("%s: access check failed: %w", name, err)
+		}
 	}
 	availablePeriods, err := r.listAvailablePeriods(ctx)
 	if err != nil {
@@ -351,9 +399,13 @@ func (r *PolicyRepository) ReplacePolicies(ctx context.Context, in GlobalPolicy)
 		UPDATE processing_policy_config
 		SET enable_download = $1,
 		    enable_csv = $2,
-		    enable_parquet = $3
+		    enable_parquet = $3,
+		    download_dir = $4,
+		    csv_dir = $5,
+		    parquet_dir = $6
 		WHERE id = 1`,
 		in.Processing.EnableDownload, in.Processing.EnableCSV, in.Processing.EnableParquet,
+		normalizedDirs.DownloadDir, normalizedDirs.CSVDir, normalizedDirs.ParquetDir,
 	); err != nil {
 		return err
 	}
@@ -382,6 +434,22 @@ func (r *PolicyRepository) ProcessingStages(ctx context.Context) (ProcessingStag
 		return ProcessingStages{}, err
 	}
 	return stages, nil
+}
+
+// ProcessingDirectories returns the configured optional directories.
+func (r *PolicyRepository) ProcessingDirectories(ctx context.Context) (ProcessingDirectories, error) {
+	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
+		return ProcessingDirectories{}, err
+	}
+	var dirs ProcessingDirectories
+	if err := r.db.QueryRow(ctx, `
+		SELECT download_dir, csv_dir, parquet_dir
+		FROM processing_policy_config
+		WHERE id = 1`,
+	).Scan(&dirs.DownloadDir, &dirs.CSVDir, &dirs.ParquetDir); err != nil {
+		return ProcessingDirectories{}, err
+	}
+	return dirs, nil
 }
 
 // policySelectionSummary returns how many catalogs and period rows are selected in the global policy.

@@ -70,7 +70,13 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	_ = s.stageRepo.SetRunning(ctx, file.ID, domain.StageDownload)
 	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusDownloading)
 
-	destPath := storage.DBCPath(file.RootPath, file.Catalog, file.State, file.Year, file.Month, file.Filename)
+	downloadRoot := file.RootPath
+	if s.policy != nil {
+		if dirs, dirErr := s.policy.ProcessingDirectories(ctx); dirErr == nil {
+			downloadRoot = storage.ResolveDirectory(dirs.DownloadDir, downloadRoot)
+		}
+	}
+	destPath := storage.DBCPath(downloadRoot, file.Catalog, file.State, file.Year, file.Month, file.Filename)
 
 	if err := storage.EnsureDir(destPath); err != nil {
 		return s.fail(ctx, file, job, fmt.Errorf("ensure dir: %w", err))

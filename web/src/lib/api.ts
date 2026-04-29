@@ -339,6 +339,26 @@ function normalizePolicies(raw: unknown): PoliciesResponse {
         ) ?? true,
       ),
     },
+    directories: {
+      download_dir:
+        pick<string>(
+          pick<Record<string, unknown>>(r, "directories", "Directories") ?? {},
+          "download_dir",
+          "DownloadDir",
+        ) ?? undefined,
+      csv_dir:
+        pick<string>(
+          pick<Record<string, unknown>>(r, "directories", "Directories") ?? {},
+          "csv_dir",
+          "CSVDir",
+        ) ?? undefined,
+      parquet_dir:
+        pick<string>(
+          pick<Record<string, unknown>>(r, "directories", "Directories") ?? {},
+          "parquet_dir",
+          "ParquetDir",
+        ) ?? undefined,
+    },
   };
 }
 
@@ -358,6 +378,7 @@ export async function putPolicies(input: {
   selected_catalogs: string[];
   selected_periods: { years: number[]; months: Array<{ year: number; month: number }> };
   processing: { enable_download: boolean; enable_csv: boolean; enable_parquet: boolean };
+  directories?: { download_dir?: string; csv_dir?: string; parquet_dir?: string };
 }): Promise<PoliciesResponse> {
   const data = await req<unknown>("/api/policies", {
     method: "PUT",

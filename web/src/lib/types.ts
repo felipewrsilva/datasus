@@ -190,6 +190,11 @@ export interface PoliciesResponse {
     enable_csv: boolean;
     enable_parquet: boolean;
   };
+  directories: {
+    download_dir?: string;
+    csv_dir?: string;
+    parquet_dir?: string;
+  };
 }
 
 /** Backward compatibility for old links, prefer status filter. */

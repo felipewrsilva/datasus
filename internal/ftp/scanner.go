@@ -132,6 +132,11 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 		RemoteTimestamp: &modTime,
 		RootPath:        s.rootPath,
 	}
+	if s.policy != nil {
+		if dirs, dirErr := s.policy.ProcessingDirectories(ctx); dirErr == nil && dirs.DownloadDir != nil && strings.TrimSpace(*dirs.DownloadDir) != "" {
+			params.RootPath = *dirs.DownloadDir
+		}
+	}
 
 	file, changed, err := s.fileRepo.UpsertFromFTP(ctx, params)
 	if err != nil {
