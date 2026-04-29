@@ -613,6 +613,26 @@ func parseListFiltersMap(input map[string]any) repository.ListFilters {
 	if v, ok := input["filename"].(string); ok {
 		f.Filename = v
 	}
+	if v, ok := input["segment"].(string); ok && strings.TrimSpace(v) != "" {
+		s := strings.ToUpper(strings.TrimSpace(v))
+		if len(s) == 1 {
+			f.Segment = &s
+		}
+	}
+	if v, ok := input["has_segment"]; ok {
+		if b, ok := v.(bool); ok {
+			f.HasSegment = &b
+		} else if s, ok := v.(string); ok {
+			switch strings.ToLower(strings.TrimSpace(s)) {
+			case "1", "true", "yes", "on":
+				t := true
+				f.HasSegment = &t
+			case "0", "false", "no", "off":
+				t := false
+				f.HasSegment = &t
+			}
+		}
+	}
 	if v, ok := input["ftp_dir"].(string); ok {
 		f.FTPDir = v
 	}

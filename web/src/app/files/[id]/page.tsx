@@ -10,7 +10,7 @@ import { OverallStatusBadge } from "@/components/StageStatusBadge";
 import { GlobalActions } from "@/components/ActionButtons";
 import { stateNamePtBR } from "@/lib/stateLabels";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
-import { formatDateTimeBR, formatTimeOnlySecondsBR } from "@/lib/dateFormat";
+import { formatDateTimeBR, formatDateTimeSecondsBR } from "@/lib/dateFormat";
 
 const POLL_MS = 5_000;
 
@@ -134,6 +134,8 @@ export default function FileDetailPage() {
             <dt className="text-[var(--muted)]">Estado</dt><dd>{stateNamePtBR(file.state)}</dd>
             <dt className="text-[var(--muted)]">Ano / Mês</dt>
             <dd>{file.year} / {String(file.month).padStart(2, "0")}</dd>
+            <dt className="text-[var(--muted)]">Parte</dt>
+            <dd className="font-mono">{file.segment ?? "—"}</dd>
             <dt className="text-[var(--muted)]">Caminho</dt>
             <dd className="font-mono text-xs break-all">{file.ftp_path}</dd>
             <dt className="text-[var(--muted)]">Tamanho</dt>
@@ -189,7 +191,7 @@ export default function FileDetailPage() {
               logs.map((l) => (
                 <div key={l.id} className="flex gap-3">
                   {l.created_at && (
-                    <span className="shrink-0 text-slate-600">{formatTimeOnlySecondsBR(l.created_at)}</span>
+                    <span className="shrink-0 text-slate-600">{formatDateTimeSecondsBR(l.created_at)}</span>
                   )}
                   <span className="shrink-0 text-slate-500">[{l.stage.slice(0, 3)}]</span>
                   <span className={l.event_type === "failed" ? "text-rose-300" : l.event_type === "completed" ? "text-emerald-300" : "text-slate-300"}>

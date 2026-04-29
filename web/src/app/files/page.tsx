@@ -508,11 +508,12 @@ function FilesPageContent() {
           <div
             className={`overflow-x-auto ${tableBusy && initialized ? "pointer-events-none select-none opacity-60" : ""}`}
           >
-            <table className="min-w-[860px] w-full text-sm" aria-busy={tableBusy && initialized}>
+            <table className="min-w-[940px] w-full text-sm" aria-busy={tableBusy && initialized}>
             <thead className="border-b border-[var(--border)] bg-[var(--accent-soft)]/40">
               <tr>
                 {[
                   { label: "Arquivo", sort: "filename" },
+                  { label: "Parte", sort: "segment" },
                   { label: "Catálogo", sort: "catalog" },
                   { label: "Estado", sort: "state" },
                   { label: "Ano/Mês", sort: "year_month" },
@@ -546,7 +547,7 @@ function FilesPageContent() {
               {!initialized ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-[var(--border)]/70">
-                    {Array.from({ length: 7 }).map((_, j) => (
+                    {Array.from({ length: 8 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="animate-pulse bg-[var(--border)] rounded h-4 w-full" />
                       </td>
@@ -555,7 +556,7 @@ function FilesPageContent() {
                 ))
               ) : files.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-[var(--muted)]">
+                  <td colSpan={8} className="px-4 py-10 text-center text-[var(--muted)]">
                     <p className="text-sm text-[var(--foreground)]">Nenhum arquivo encontrado para os filtros ativos.</p>
                     <p className="mt-1 text-xs text-[var(--muted)]">Revise os filtros ou volte para uma busca mais ampla.</p>
                     <button type="button" onClick={clearAllFilters} className="mt-3 rounded-full border border-[var(--border)] px-3 py-1 text-xs">
@@ -567,6 +568,7 @@ function FilesPageContent() {
                 files.map((f) => (
                   <tr key={f.id} className="border-b border-[var(--border)]/70 transition hover:bg-[var(--accent-soft)]/40">
                     <td className="px-4 py-3 font-mono font-medium">{f.filename}</td>
+                    <td className="px-4 py-3 font-mono text-center text-xs">{f.segment ?? "—"}</td>
                     <td className="px-4 py-3">{formatCatalogLabel(f.catalog)}</td>
                     <td className="px-4 py-3">{stateNamePtBR(f.state)}</td>
                     <td className="px-4 py-3">{f.year}/{String(f.month).padStart(2, "0")}</td>

@@ -108,3 +108,18 @@ Important ones:
 - `DOWNLOAD_WORKERS`, `CSV_WORKERS`, `PARQUET_WORKERS`
 - `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`, `STUCK_JOB_TIMEOUT`
 - `LOG_LEVEL`, `API_PORT`
+
+## Date display standard (UI)
+
+All dates shown to users in the web UI must use Brazilian format with locale `pt-BR`.
+
+- Date only: `dd/MM/yyyy`
+- Date and time default: `dd/MM/yyyy HH:mm`
+- Detailed logs and audits: `dd/MM/yyyy HH:mm:ss`
+
+Rules:
+
+- API contracts keep technical timestamp values as ISO/RFC3339.
+- UI formatting must always use shared helpers from `web/src/lib/dateFormat.ts`.
+- Never render ISO timestamps directly to users.
+- Timezone for display follows the local timezone of each user browser.

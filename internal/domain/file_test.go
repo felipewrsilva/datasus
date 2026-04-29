@@ -55,7 +55,8 @@ func TestParseFilename_Invalid(t *testing.T) {
 		desc  string
 	}{
 		{"SPTO260.dbc", "base too short"},
-		{"SPTO26020.dbc", "base too long"},
+		{"SPTO26020.dbc", "nine chars non-letter suffix"},
+		{"RDSP2401AB.dbc", "base too long"},
 		{"SPTO2602.csv", "wrong extension"},
 		{"SPTO2602", "no extension"},
 		{"12TO2602.dbc", "numeric catalog"},
@@ -69,6 +70,45 @@ func TestParseFilename_Invalid(t *testing.T) {
 			_, err := domain.ParseFilename(tc.input)
 			if err == nil {
 				t.Errorf("expected error for %q (%s), got nil", tc.input, tc.desc)
+			}
+		})
+	}
+}
+
+func TestParseFilename_SegmentedParts(t *testing.T) {
+	cases := []struct {
+		input   string
+		catalog string
+		state   string
+		year    int
+		month   int
+		segment string
+	}{
+		{"RDSP2401A.dbc", "RD", "SP", 2024, 1, "A"},
+		{"rdsp2401b.dbc", "RD", "SP", 2024, 1, "B"},
+		{"SPSP2501Z.dbc", "SP", "SP", 2025, 1, "Z"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := domain.ParseFilename(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Catalog != tc.catalog {
+				t.Errorf("catalog: want %q, got %q", tc.catalog, got.Catalog)
+			}
+			if got.State != tc.state {
+				t.Errorf("state: want %q, got %q", tc.state, got.State)
+			}
+			if got.Year != tc.year {
+				t.Errorf("year: want %d, got %d", tc.year, got.Year)
+			}
+			if got.Month != tc.month {
+				t.Errorf("month: want %d, got %d", tc.month, got.Month)
+			}
+			if got.Segment != tc.segment {
+				t.Errorf("segment: want %q, got %q", tc.segment, got.Segment)
 			}
 		})
 	}

@@ -1,22 +1,24 @@
-const DATE_TIME_ZONE = "America/Sao_Paulo";
 const INVALID_LABEL = "Data desconhecida";
+const LEFT_TO_RIGHT_MARK = /\u200e/g;
 
-function parseDate(value: string | null | undefined): Date | null {
+function parseDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
-  const parsed = new Date(value);
+  const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 }
 
+function normalizeFormattedDateTime(value: string): string {
+  return value.replace(LEFT_TO_RIGHT_MARK, "").replace(",", "");
+}
+
 const dateOnlyFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: DATE_TIME_ZONE,
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
 });
 
 const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: DATE_TIME_ZONE,
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -26,7 +28,6 @@ const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const dateTimeSecondsFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: DATE_TIME_ZONE,
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -37,32 +38,31 @@ const dateTimeSecondsFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const timeOnlySecondsFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: DATE_TIME_ZONE,
   hour: "2-digit",
   minute: "2-digit",
   second: "2-digit",
   hour12: false,
 });
 
-export function formatDateBR(value: string | null | undefined): string {
+export function formatDateBR(value: string | Date | null | undefined): string {
   const parsed = parseDate(value);
   if (!parsed) return INVALID_LABEL;
   return dateOnlyFormatter.format(parsed);
 }
 
-export function formatDateTimeBR(value: string | null | undefined): string {
+export function formatDateTimeBR(value: string | Date | null | undefined): string {
   const parsed = parseDate(value);
   if (!parsed) return INVALID_LABEL;
-  return dateTimeFormatter.format(parsed);
+  return normalizeFormattedDateTime(dateTimeFormatter.format(parsed));
 }
 
-export function formatDateTimeSecondsBR(value: string | null | undefined): string {
+export function formatDateTimeSecondsBR(value: string | Date | null | undefined): string {
   const parsed = parseDate(value);
   if (!parsed) return INVALID_LABEL;
-  return dateTimeSecondsFormatter.format(parsed);
+  return normalizeFormattedDateTime(dateTimeSecondsFormatter.format(parsed));
 }
 
-export function formatTimeOnlySecondsBR(value: string | null | undefined): string {
+export function formatTimeOnlySecondsBR(value: string | Date | null | undefined): string {
   const parsed = parseDate(value);
   if (!parsed) return "";
   return timeOnlySecondsFormatter.format(parsed);

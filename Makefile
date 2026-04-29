@@ -21,7 +21,7 @@ lint:
 
 # Run database migrations manually (useful for local dev outside Docker)
 migrate:
-	psql "$(DATABASE_URL)" -f migrations/001_initial.sql -f migrations/002_indexes.sql -f migrations/003_policy.sql -f migrations/004_policy_simplification.sql
+	psql "$(DATABASE_URL)" -f migrations/001_initial.sql -f migrations/002_indexes.sql -f migrations/003_policy.sql -f migrations/004_policy_simplification.sql -f migrations/005_global_download_policy.sql -f migrations/006_processing_policy.sql -f migrations/007_dynamic_policy_period_constraints.sql -f migrations/008_status_pending_ignored.sql -f migrations/009_files_display_timestamp_sort.sql -f migrations/010_processing_policy_directories.sql -f migrations/011_files_segment.sql
 
 # Docker Compose helpers
 up:

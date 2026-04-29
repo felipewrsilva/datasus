@@ -38,3 +38,19 @@ func TestCanonicalPath_Idempotent(t *testing.T) {
 		t.Error("path generation must be deterministic")
 	}
 }
+
+func TestCanonicalPath_SegmentedPartsDistinct(t *testing.T) {
+	a := storage.DBCPath("/data", "RD", "SP", 2024, 1, "RDSP2401A.dbc")
+	b := storage.DBCPath("/data", "RD", "SP", 2024, 1, "RDSP2401B.dbc")
+	if a == b {
+		t.Fatal("segmented parts must not share the same dbc path")
+	}
+	wantA := filepath.Join("/data", "RD", "SP", "2024", "01", "RDSP2401A.dbc")
+	wantB := filepath.Join("/data", "RD", "SP", "2024", "01", "RDSP2401B.dbc")
+	if a != wantA {
+		t.Errorf("want %q, got %q", wantA, a)
+	}
+	if b != wantB {
+		t.Errorf("want %q, got %q", wantB, b)
+	}
+}

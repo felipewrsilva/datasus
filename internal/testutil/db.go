@@ -14,6 +14,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,18 +44,16 @@ func TestDB(t *testing.T) *pgxpool.Pool {
 }
 
 func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	migrations := []string{
-		"../../migrations/001_initial.sql",
-		"../../migrations/002_indexes.sql",
-		"../../migrations/003_policy.sql",
-		"../../migrations/004_policy_simplification.sql",
-		"../../migrations/005_global_download_policy.sql",
-		"../../migrations/006_processing_policy.sql",
+	dir := filepath.Join("..", "..", "migrations")
+	matches, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+	if err != nil {
+		return fmt.Errorf("glob migrations: %w", err)
 	}
-	for _, path := range migrations {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
+	sort.Strings(matches)
+	for _, path := range matches {
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", path, readErr)
 		}
 		if _, err := pool.Exec(ctx, string(b)); err != nil {
 			// Ignore "already exists" errors — idempotent

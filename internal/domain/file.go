@@ -87,6 +87,7 @@ type File struct {
 	State           string
 	Year            int
 	Month           int
+	Segment         *string `json:"segment,omitempty"` // optional single-letter part (e.g. A for RDSP2401A.DBC)
 	FTPDir          string
 	FTPPath         string
 	SizeBytes       *int64
@@ -122,10 +123,16 @@ type ParsedFilename struct {
 	State   string
 	Year    int
 	Month   int
+	// Segment is a single ASCII letter A-Z when the file is a multi-part variant (e.g. RDSP2401A.DBC); empty otherwise.
+	Segment string
 }
 
-// ParseFilename decodes a DATASUS filename like "SPTO2602.dbc" into its fields.
-// Format: [catalog:2][state:2][year:2][month:2].dbc (case-insensitive extension)
+func isASCIILetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
+// ParseFilename decodes a DATASUS filename like "SPTO2602.dbc" or "RDSP2401A.dbc" into its fields.
+// Format: [catalog:2][state:2][year:2][month:2][segment?:1].dbc (case-insensitive extension; segment is one ASCII letter when present)
 func ParseFilename(name string) (ParsedFilename, error) {
 	ext := strings.ToLower(filepath.Ext(name))
 	base := strings.ToUpper(strings.TrimSuffix(name, filepath.Ext(name)))
@@ -133,8 +140,21 @@ func ParseFilename(name string) (ParsedFilename, error) {
 	if ext != ".dbc" {
 		return ParsedFilename{}, fmt.Errorf("expected .dbc extension, got %q", ext)
 	}
-	if len(base) != 8 {
-		return ParsedFilename{}, fmt.Errorf("expected 8-char base name, got %d chars in %q", len(base), base)
+
+	origBase := base
+	var segment string
+	switch len(base) {
+	case 8:
+		// standard CAESYYMM
+	case 9:
+		last := base[8]
+		if !isASCIILetter(last) {
+			return ParsedFilename{}, fmt.Errorf("expected segment suffix to be a single ASCII letter, got %q in %q", string(last), origBase)
+		}
+		segment = string(last)
+		base = base[:8]
+	default:
+		return ParsedFilename{}, fmt.Errorf("expected 8 or 9 char base name, got %d chars in %q", len(origBase), origBase)
 	}
 
 	catalog := base[0:2]
@@ -178,6 +198,7 @@ func ParseFilename(name string) (ParsedFilename, error) {
 		State:   state,
 		Year:    fullYear,
 		Month:   month,
+		Segment: segment,
 	}, nil
 }
 

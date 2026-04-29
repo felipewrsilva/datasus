@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -16,12 +17,12 @@ type LogRepository struct {
 }
 
 type ManualActionAudit struct {
-	ID         int64           `json:"id"`
-	Action     string          `json:"action"`
+	ID         int64             `json:"id"`
+	Action     string            `json:"action"`
 	Stage      *domain.StageName `json:"stage"`
-	Actor      string          `json:"actor"`
-	DetailsRaw []byte          `json:"details_json"`
-	CreatedAt  string          `json:"created_at"`
+	Actor      string            `json:"actor"`
+	DetailsRaw []byte            `json:"details_json"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 func NewLogRepository(db *pgxpool.Pool) *LogRepository {
@@ -35,7 +36,7 @@ type LogEntry struct {
 	EventType   string           `json:"event_type"`
 	Message     string           `json:"message"`
 	PayloadJSON []byte           `json:"payload_json"`
-	CreatedAt   *string          `json:"created_at,omitempty"`
+	CreatedAt   *time.Time       `json:"created_at,omitempty"`
 }
 
 func (r *LogRepository) Insert(ctx context.Context, fileID string, stage domain.StageName, eventType, message string, payload any) error {
@@ -63,7 +64,7 @@ func (r *LogRepository) ListByFile(ctx context.Context, fileID string, limit int
 		limit = 100
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT id, file_id, stage, event_type, message, payload_json, created_at::text
+		SELECT id, file_id, stage, event_type, message, payload_json, created_at
 		FROM download_logs
 		WHERE file_id=$1
 		ORDER BY created_at DESC
@@ -112,7 +113,7 @@ func (r *LogRepository) ListManualActions(ctx context.Context, limit int) ([]Man
 		limit = 50
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT id, action, stage, actor, details_json, created_at::text
+		SELECT id, action, stage, actor, details_json, created_at
 		FROM manual_action_audit
 		ORDER BY created_at DESC
 		LIMIT $1`, limit)

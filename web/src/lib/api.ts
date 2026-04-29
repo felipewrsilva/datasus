@@ -38,6 +38,7 @@ function normalizeFile(raw: unknown): DatFile {
     state: pick<string>(r, "state", "State") ?? "",
     year: Number(pick<number | string>(r, "year", "Year") ?? 0),
     month: Number(pick<number | string>(r, "month", "Month") ?? 0),
+    segment: (pick<string | null>(r, "segment", "Segment") ?? null) as string | null,
     ftp_dir: pick<string>(r, "ftp_dir", "FTPDir") ?? "",
     ftp_path: pick<string>(r, "ftp_path", "FTPPath") ?? "",
     size_bytes: (pick<number | null>(r, "size_bytes", "SizeBytes") ?? null) as number | null,
@@ -243,6 +244,11 @@ export async function getFiles(filters: FileFilters = {}): Promise<FilesResponse
   if (filters.month) params.set("month", String(filters.month));
   if (filters.ftp_dir) params.set("ftp_dir", filters.ftp_dir);
   if (filters.filename) params.set("filename", filters.filename);
+  if (filters.segment && filters.segment.length === 1) {
+    params.set("segment", filters.segment.toUpperCase());
+  }
+  if (filters.has_segment === true) params.set("has_segment", "true");
+  if (filters.has_segment === false) params.set("has_segment", "false");
   if (filters.status) params.set("status", filters.status);
   if (filters.statuses) {
     for (const status of filters.statuses) params.append("status", status);

@@ -90,7 +90,6 @@ func (e *NativeEncoder) Encode(ctx context.Context, dbcPath, parquetPath string)
 
 	start := time.Now()
 	var rows int64
-	rec := make([]interface{}, len(columns))
 
 	for dbcReader.Next() {
 		if ctx.Err() != nil {
@@ -98,6 +97,9 @@ func (e *NativeEncoder) Encode(ctx context.Context, dbcPath, parquetPath string)
 			return fmt.Errorf("dbc to parquet conversion timed out after %s, rows=%d", e.Timeout, rows)
 		}
 		record := dbcReader.Row()
+		// New slice per row: parquet-go's ParquetWriter.Write appends the slice by reference
+		// and only serializes on Flush, so reusing one buffer would make every row show the last row's values.
+		rec := make([]interface{}, len(columns))
 		for i := range columns {
 			if i < len(record) {
 				rec[i] = valueToString(record[i])

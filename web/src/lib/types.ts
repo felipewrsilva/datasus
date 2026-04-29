@@ -20,6 +20,8 @@ export interface DatFile {
   state: string;
   year: number;
   month: number;
+  /** Single-letter part for multi-part .dbc, null if standard CAESYYMM file. */
+  segment: string | null;
   ftp_dir: string;
   ftp_path: string;
   size_bytes: number | null;
@@ -213,6 +215,10 @@ export interface FileFilters {
   period_to_month?: number;
   ftp_dir?: string;
   filename?: string;
+  /** Exact segment letter A-Z */
+  segment?: string;
+  /** True: only multi-part rows, false: only rows without segment */
+  has_segment?: boolean;
   status?: OverallStatus;
   statuses?: OverallStatus[];
   /** Backward compatibility with old dashboard links. */

@@ -119,12 +119,19 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 	modTime := e.ModTime
 	size := e.Size
 
+	var segPtr *string
+	if parsed.Segment != "" {
+		s := parsed.Segment
+		segPtr = &s
+	}
+
 	params := repository.UpsertFTPParams{
 		Filename:        strings.ToUpper(e.Name),
 		Catalog:         parsed.Catalog,
 		State:           parsed.State,
 		Year:            parsed.Year,
 		Month:           parsed.Month,
+		Segment:         segPtr,
 		FTPDir:          dir,
 		FTPPath:         e.RemotePath,
 		SizeBytes:       &size,

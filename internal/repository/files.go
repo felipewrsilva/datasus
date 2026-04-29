@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,6 +54,8 @@ type ListFilters struct {
 	States          []string
 	Year            *int
 	Month           *int
+	Segment         *string
+	HasSegment      *bool
 	PeriodFromYear  *int
 	PeriodFromMonth *int
 	PeriodToYear    *int
@@ -80,7 +83,7 @@ type ListFilters struct {
 
 func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, error) {
 	const q = `
-		SELECT id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		SELECT id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		       size_bytes, remote_checksum, remote_timestamp, local_hash,
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
@@ -96,7 +99,7 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, 
 
 func (r *FileRepository) GetByFilename(ctx context.Context, filename string) (*domain.File, error) {
 	const q = `
-		SELECT id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		SELECT id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		       size_bytes, remote_checksum, remote_timestamp, local_hash,
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
@@ -163,6 +166,19 @@ func (r *FileRepository) List(ctx context.Context, f ListFilters) ([]*domain.Fil
 	if f.Filename != "" {
 		addFilenameGlob("filename", f.Filename)
 	}
+	if f.Segment != nil && strings.TrimSpace(*f.Segment) != "" {
+		seg := strings.ToUpper(strings.TrimSpace(*f.Segment))
+		if len(seg) == 1 {
+			add("segment", seg)
+		}
+	}
+	if f.HasSegment != nil {
+		if *f.HasSegment {
+			where += " AND segment IS NOT NULL"
+		} else {
+			where += " AND segment IS NULL"
+		}
+	}
 	if len(f.OverallStatuses) > 0 {
 		statuses := make([]string, 0, len(f.OverallStatuses))
 		for _, s := range f.OverallStatuses {
@@ -205,7 +221,7 @@ func (r *FileRepository) List(ctx context.Context, f ListFilters) ([]*domain.Fil
 	switch f.SortBy {
 	case "year_month":
 		orderBy = fmt.Sprintf("year %s, month %s", sortDir, sortDir)
-	case "filename", "catalog", "state", "year", "month", "overall_status", "updated_at", "created_at":
+	case "filename", "catalog", "state", "year", "month", "segment", "overall_status", "updated_at", "created_at":
 		orderBy = f.SortBy + " " + sortDir
 	}
 
@@ -218,7 +234,7 @@ func (r *FileRepository) List(ctx context.Context, f ListFilters) ([]*domain.Fil
 
 	args = append(args, f.Limit, f.Offset)
 	listQ := fmt.Sprintf(`
-		SELECT id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		SELECT id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		       size_bytes, remote_checksum, remote_timestamp, local_hash,
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
@@ -248,7 +264,7 @@ func (r *FileRepository) FindByIDs(ctx context.Context, ids []string) ([]*domain
 		return []*domain.File{}, nil
 	}
 	rows, err := r.db.Query(ctx, `
-		SELECT id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		SELECT id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		       size_bytes, remote_checksum, remote_timestamp, local_hash,
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
@@ -298,7 +314,7 @@ func (r *FileRepository) FindByFilters(ctx context.Context, f ListFilters, maxRo
 
 func (r *FileRepository) ListFailedSince(ctx context.Context, since time.Time, stage domain.StageName) ([]*domain.File, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT f.id, f.filename, f.catalog, f.state, f.year, f.month, f.ftp_dir, f.ftp_path,
+		SELECT f.id, f.filename, f.catalog, f.state, f.year, f.month, f.segment, f.ftp_dir, f.ftp_path,
 		       f.size_bytes, f.remote_checksum, f.remote_timestamp, f.local_hash,
 		       f.root_path, f.dbc_path, f.csv_path, f.parquet_path,
 		       f.overall_status, f.created_at, f.updated_at, f.last_seen_at
@@ -334,27 +350,29 @@ func min(a, b int) int {
 // Returns (file, changed) where changed=true means the remote content differs.
 func (r *FileRepository) UpsertFromFTP(ctx context.Context, params UpsertFTPParams) (*domain.File, bool, error) {
 	const q = `
-		INSERT INTO files (filename, catalog, state, year, month, ftp_dir, ftp_path,
+		INSERT INTO files (filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		                   size_bytes, remote_checksum, remote_timestamp,
 		                   root_path, last_seen_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
 		ON CONFLICT (filename) DO UPDATE
 		    SET ftp_path          = EXCLUDED.ftp_path,
 		        size_bytes        = EXCLUDED.size_bytes,
 		        remote_checksum   = EXCLUDED.remote_checksum,
 		        remote_timestamp  = EXCLUDED.remote_timestamp,
+		        segment           = EXCLUDED.segment,
 		        last_seen_at      = now(),
 		        updated_at        = now()
-		RETURNING id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		RETURNING id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		          size_bytes, remote_checksum, remote_timestamp, local_hash,
 		          root_path, dbc_path, csv_path, parquet_path,
 		          overall_status, created_at, updated_at, last_seen_at,
 		          (xmax = 0) AS is_new,
-		          (remote_checksum IS DISTINCT FROM $9 OR remote_timestamp IS DISTINCT FROM $10) AS content_changed`
+		          (remote_checksum IS DISTINCT FROM $10 OR remote_timestamp IS DISTINCT FROM $11) AS content_changed`
 
 	var isNew, contentChanged bool
 	row := r.db.QueryRow(ctx, q,
 		params.Filename, params.Catalog, params.State, params.Year, params.Month,
+		params.Segment,
 		params.FTPDir, params.FTPPath, params.SizeBytes,
 		params.RemoteChecksum, params.RemoteTimestamp, params.RootPath,
 	)
@@ -365,9 +383,11 @@ func (r *FileRepository) UpsertFromFTP(ctx context.Context, params UpsertFTPPara
 	var remoteChecksum, localHash *string
 	var remoteTimestamp *time.Time
 	var dbcPath, csvPath, parquetPath *string
+	var segment sql.NullString
 
 	err := row.Scan(
 		&f.ID, &f.Filename, &f.Catalog, &f.State, &f.Year, &f.Month,
+		&segment,
 		&f.FTPDir, &f.FTPPath, &sizeBytes, &remoteChecksum, &remoteTimestamp,
 		&localHash, &f.RootPath, &dbcPath, &csvPath, &parquetPath,
 		&f.OverallStatus, &f.CreatedAt, &f.UpdatedAt, &f.LastSeenAt,
@@ -383,6 +403,12 @@ func (r *FileRepository) UpsertFromFTP(ctx context.Context, params UpsertFTPPara
 	f.DBCPath = dbcPath
 	f.CSVPath = csvPath
 	f.ParquetPath = parquetPath
+	if segment.Valid {
+		s := strings.TrimSpace(segment.String)
+		if s != "" {
+			f.Segment = &s
+		}
+	}
 
 	return f, isNew || contentChanged, nil
 }
@@ -393,6 +419,7 @@ type UpsertFTPParams struct {
 	State           string
 	Year            int
 	Month           int
+	Segment         *string
 	FTPDir          string
 	FTPPath         string
 	SizeBytes       *int64
@@ -434,7 +461,7 @@ func (r *FileRepository) MarkPurged(ctx context.Context, id string) error {
 func (r *FileRepository) FindByPattern(ctx context.Context, userPattern string) ([]*domain.File, error) {
 	pat := FilenameGlobToILike(userPattern)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT id, filename, catalog, state, year, month, ftp_dir, ftp_path,
+		SELECT id, filename, catalog, state, year, month, segment, ftp_dir, ftp_path,
 		       size_bytes, remote_checksum, remote_timestamp, local_hash,
 		       root_path, dbc_path, csv_path, parquet_path,
 		       overall_status, created_at, updated_at, last_seen_at
@@ -706,9 +733,11 @@ func scanFile(row scannable) (*domain.File, error) {
 	var remoteChecksum, localHash *string
 	var remoteTimestamp *time.Time
 	var dbcPath, csvPath, parquetPath *string
+	var segment sql.NullString
 
 	err := row.Scan(
 		&f.ID, &f.Filename, &f.Catalog, &f.State, &f.Year, &f.Month,
+		&segment,
 		&f.FTPDir, &f.FTPPath, &sizeBytes, &remoteChecksum, &remoteTimestamp,
 		&localHash, &f.RootPath, &dbcPath, &csvPath, &parquetPath,
 		&f.OverallStatus, &f.CreatedAt, &f.UpdatedAt, &f.LastSeenAt,
@@ -723,5 +752,11 @@ func scanFile(row scannable) (*domain.File, error) {
 	f.DBCPath = dbcPath
 	f.CSVPath = csvPath
 	f.ParquetPath = parquetPath
+	if segment.Valid {
+		s := strings.TrimSpace(segment.String)
+		if s != "" {
+			f.Segment = &s
+		}
+	}
 	return f, nil
 }

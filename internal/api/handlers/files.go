@@ -70,6 +70,20 @@ func (h *FilesHandler) List(w http.ResponseWriter, r *http.Request) {
 		mo, _ := strconv.Atoi(m)
 		f.Month = &mo
 	}
+	if seg := strings.TrimSpace(q.Get("segment")); len(seg) == 1 {
+		u := strings.ToUpper(seg)
+		f.Segment = &u
+	}
+	if raw := strings.TrimSpace(q.Get("has_segment")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes", "on":
+			v := true
+			f.HasSegment = &v
+		case "0", "false", "no", "off":
+			v := false
+			f.HasSegment = &v
+		}
+	}
 	if y := q.Get("period_from_year"); y != "" {
 		yr, _ := strconv.Atoi(y)
 		f.PeriodFromYear = &yr

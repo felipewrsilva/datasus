@@ -6,6 +6,17 @@ import (
 	"datasus/internal/domain"
 )
 
+func TestParseFilename_SegmentedAcceptedByDomain(t *testing.T) {
+	t.Parallel()
+	got, err := domain.ParseFilename("RDSP2401A.dbc")
+	if err != nil {
+		t.Fatalf("ParseFilename: %v", err)
+	}
+	if got.Segment != "A" || got.Catalog != "RD" || got.State != "SP" {
+		t.Fatalf("unexpected parse: %+v", got)
+	}
+}
+
 func TestShouldMoveToIgnored(t *testing.T) {
 	t.Parallel()
 

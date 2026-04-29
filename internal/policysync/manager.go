@@ -150,12 +150,18 @@ func (m *Manager) run(reason, actor string) {
 		}
 		mod := info.ModTime()
 		size := info.Size()
+		var segPtr *string
+		if parsed.Segment != "" {
+			s := parsed.Segment
+			segPtr = &s
+		}
 		file, _, err := m.fileRepo.UpsertFromFTP(ctx, repository.UpsertFTPParams{
 			Filename:        strings.ToUpper(d.Name()),
 			Catalog:         parsed.Catalog,
 			State:           parsed.State,
 			Year:            parsed.Year,
 			Month:           parsed.Month,
+			Segment:         segPtr,
 			FTPDir:          "local_policy",
 			FTPPath:         path,
 			SizeBytes:       &size,
