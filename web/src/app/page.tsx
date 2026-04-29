@@ -215,10 +215,17 @@ export default function DashboardPage() {
 
         <section aria-labelledby="resumo-heading" className="mb-8">
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h2 id="resumo-heading" className="text-sm font-medium text-[var(--foreground)]">
-              Resumo
-            </h2>
-            {resumoHint ? <ContextualHint text={resumoHint} /> : null}
+            {resumoHint ? (
+              <ContextualHint text={resumoHint}>
+                <h2 id="resumo-heading" className="text-sm font-medium text-[var(--foreground)]">
+                  Resumo
+                </h2>
+              </ContextualHint>
+            ) : (
+              <h2 id="resumo-heading" className="text-sm font-medium text-[var(--foreground)]">
+                Resumo
+              </h2>
+            )}
           </div>
           {!initialized ? (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
@@ -229,22 +236,38 @@ export default function DashboardPage() {
           ) : (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
               {kpiCards.map((card) => (
-                <div
-                  key={card.label}
-                  className={`glass-card relative rounded-2xl p-4 transition hover:ring-1 hover:ring-[var(--accent)] ${card.cardClassName ?? ""}`}
-                >
-                  {card.hint ? (
-                    <div className="absolute right-3 top-3 z-10">
-                      <ContextualHint text={card.hint} />
+                card.hint ? (
+                  <ContextualHint
+                    key={card.label}
+                    text={card.hint}
+                    ariaLabel={`${card.label}: ${card.value.toLocaleString("pt-BR")}`}
+                  >
+                    <div
+                      className={`glass-card rounded-2xl p-4 transition hover:ring-1 hover:ring-[var(--accent)] ${card.cardClassName ?? ""}`}
+                    >
+                      <Link href={card.href} className="block" title={card.hint}>
+                        <p className="min-w-0 text-sm text-[var(--muted)]" title={card.hint}>
+                          {card.label}
+                        </p>
+                        <p className={`mt-1 text-3xl font-bold tabular-nums ${card.color}`} title={card.hint}>
+                          {card.value.toLocaleString("pt-BR")}
+                        </p>
+                      </Link>
                     </div>
-                  ) : null}
-                  <Link href={card.href} className={card.hint ? "block pr-7" : "block"}>
-                    <p className="min-w-0 text-sm text-[var(--muted)]">{card.label}</p>
-                    <p className={`mt-1 text-3xl font-bold tabular-nums ${card.color}`}>
-                      {card.value.toLocaleString("pt-BR")}
-                    </p>
-                  </Link>
-                </div>
+                  </ContextualHint>
+                ) : (
+                  <div
+                    key={card.label}
+                    className={`glass-card rounded-2xl p-4 transition hover:ring-1 hover:ring-[var(--accent)] ${card.cardClassName ?? ""}`}
+                  >
+                    <Link href={card.href} className="block">
+                      <p className="min-w-0 text-sm text-[var(--muted)]">{card.label}</p>
+                      <p className={`mt-1 text-3xl font-bold tabular-nums ${card.color}`}>
+                        {card.value.toLocaleString("pt-BR")}
+                      </p>
+                    </Link>
+                  </div>
+                )
               ))}
             </div>
           )}

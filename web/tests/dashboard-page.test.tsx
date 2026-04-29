@@ -105,5 +105,6 @@ describe("DashboardPage", () => {
     expect(await screen.findByText(/^download$/i)).toBeInTheDocument();
     expect(await screen.findByText(/^csv$/i)).toBeInTheDocument();
     expect(await screen.findByText(/^parquet$/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 });

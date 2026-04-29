@@ -1,22 +1,22 @@
-import { Info } from "lucide-react";
+import { cloneElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 type ContextualHintProps = {
   text: string;
+  children: ReactElement<{ className?: string; title?: string; "aria-label"?: string; children?: ReactNode }>;
   className?: string;
+  ariaLabel?: string;
 };
 
 /**
- * Ajuda discreta via tooltip nativo (title) e aria-label para leitores de tela.
+ * Wrapper de dica contextual sem ícone visual.
+ * Fase 2: evoluir para tooltip acessível dedicado em touch/mobile.
  */
-export function ContextualHint({ text, className = "" }: ContextualHintProps) {
-  return (
-    <button
-      type="button"
-      className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--card)] text-[var(--muted)] transition hover:text-[var(--foreground)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${className}`}
-      title={text}
-      aria-label={text}
-    >
-      <Info className="h-3 w-3" aria-hidden />
-    </button>
-  );
+export function ContextualHint({ text, children, className = "", ariaLabel }: ContextualHintProps) {
+  const mergedClassName = [children.props.className, className].filter(Boolean).join(" ");
+  return cloneElement(children, {
+    title: text,
+    "aria-label": ariaLabel ?? children.props["aria-label"],
+    className: mergedClassName || undefined,
+  });
 }
