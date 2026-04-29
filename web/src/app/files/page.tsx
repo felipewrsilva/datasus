@@ -337,7 +337,6 @@ function FilesPageContent() {
             <p className="text-sm text-[var(--muted)]">{total.toLocaleString()} arquivos</p>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <Link href="/" className="text-sm text-[var(--accent)] hover:underline">Voltar ao painel</Link>
             {ago && (
               <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
                 <span className={`h-1.5 w-1.5 rounded-full ${fetching ? "bg-blue-400 animate-pulse" : "bg-emerald-500"}`} />

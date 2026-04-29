@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getDashboardInsights, getFiles } from "@/lib/api";
 import type { DashboardInsights, DatFile } from "@/lib/types";
 import { ScanButton } from "@/components/ActionButtons";
+import { ContextualHint } from "@/components/ContextualHint";
 import { OverallStatusBadge } from "@/components/StageStatusBadge";
 import { BrazilStateMap } from "@/components/BrazilStateMap";
 import { stateNamePtBR } from "@/lib/stateLabels";
@@ -39,6 +40,15 @@ function useSecondsAgo(date: Date | null): string | null {
   return s < 5 ? "agora" : `há ${s}s`;
 }
 
+type KpiCard = {
+  label: string;
+  value: number;
+  color: string;
+  href: string;
+  hint?: string;
+  cardClassName?: string;
+};
+
 export default function DashboardPage() {
   const [insights, setInsights] = useState<DashboardInsights | null>(null);
   const [recent, setRecent] = useState<DatFile[]>([]);
@@ -71,14 +81,25 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const boot = setTimeout(() => { void load(); }, 0);
+    const boot = setTimeout(() => {
+      void load();
+    }, 0);
     const t = setInterval(load, POLL_MS);
-    return () => { clearTimeout(boot); clearInterval(t); };
+    return () => {
+      clearTimeout(boot);
+      clearInterval(t);
+    };
   }, [load]);
 
-  const stats = insights?.status_counts ?? insights?.stats ?? {};
+  const stats = useMemo(
+    () => insights?.status_counts ?? insights?.stats ?? {},
+    [insights?.status_counts, insights?.stats],
+  );
   const total = insights?.total_files ?? Object.values(stats).reduce((a, b) => a + b, 0);
-  const policyCounts = insights?.policy_counts ?? { pending: 0, ignored: 0 };
+  const policyCounts = useMemo(
+    () => insights?.policy_counts ?? { pending: 0, ignored: 0 },
+    [insights?.policy_counts],
+  );
   const maxCatalogSize = Math.max(...(insights?.by_catalog.map((x) => x.total_size_bytes) ?? [1]));
   const maxStateSize = Math.max(...(insights?.by_state.map((x) => x.total_size_bytes) ?? [1]));
 
@@ -91,36 +112,76 @@ export default function DashboardPage() {
     [insights?.by_state],
   );
 
-  const kpiCards = useMemo(() => {
+  const resumoHint = useMemo(() => {
+    if (!insights?.stage_done_counts) return undefined;
+    const d = insights.stage_done_counts;
+    return `Etapas marcadas como concluídas no registro: download ${d.download.toLocaleString("pt-BR")}, CSV ${d.csv_conversion.toLocaleString("pt-BR")}, Parquet ${d.parquet_conversion.toLocaleString("pt-BR")}.`;
+  }, [insights?.stage_done_counts]);
+
+  const kpiCards = useMemo((): KpiCard[] => {
     if (!insights) {
       return [];
     }
+    const mismatch = insights.status_stage_mismatch_count ?? 0;
+    const catMis = insights.by_catalog_total_mismatch ?? 0;
+    const stMis = insights.by_state_total_mismatch ?? 0;
+    const bucketMismatch = catMis !== 0 || stMis !== 0;
+
+    const totalHintParts = ["Soma de todas as contagens por status no cadastro."];
+    if (bucketMismatch) {
+      totalHintParts.push(
+        `Diferença entre a soma dos agrupamentos e este total: catálogo ${catMis.toLocaleString("pt-BR")}, estado ${stMis.toLocaleString("pt-BR")}. Comum quando há registros sem UF ou catálogo preenchidos.`,
+      );
+    }
+
+    const pipelineHint =
+      mismatch > 0
+        ? `Arquivos que completaram todas as etapas exigidas pela política. Há ${mismatch.toLocaleString("pt-BR")} caso(s) em que o status do arquivo não coincide com as etapas esperadas; use a lista de arquivos para inspecionar.`
+        : "Arquivos que completaram todas as etapas exigidas pela política de processamento atual.";
+
     return [
-      { label: "Arquivos totais", value: total, color: "text-[var(--foreground)]", href: "/files" as const },
       {
-        label: "Pipeline OK (política)",
+        label: "Arquivos",
+        value: total,
+        color: "text-[var(--foreground)]",
+        href: "/files",
+        hint: totalHintParts.join(" "),
+      },
+      {
+        label: "Concluídos",
         value: insights.pipeline_completed_count ?? 0,
         color: "text-[var(--status-success-fg)]",
         href: filesPathPipelineCompleted(),
+        hint: pipelineHint,
+        cardClassName: mismatch > 0 ? "ring-1 ring-amber-500/35" : undefined,
       },
       {
         label: "Em processamento",
         value: (stats?.downloading ?? 0) + (stats?.converting_csv ?? 0) + (stats?.converting_parquet ?? 0),
         color: "text-[var(--status-info-fg)]",
         href: filesPathMultiStatus(["downloading", "converting_csv", "converting_parquet"]),
+        hint: "Soma dos status em download, conversão CSV e conversão Parquet.",
       },
-      { label: "Falhas", value: stats?.failed ?? 0, color: "text-[var(--status-danger-fg)]", href: filesPath({ status: "failed" }) },
+      {
+        label: "Falhas",
+        value: stats?.failed ?? 0,
+        color: "text-[var(--status-danger-fg)]",
+        href: filesPath({ status: "failed" }),
+        hint: "Arquivos com status de falha no pipeline.",
+      },
       {
         label: "Pendentes",
         value: policyCounts.pending,
         color: "text-[var(--status-warning-fg)]",
         href: filesPath({ status: "pending" }),
+        hint: "Arquivos ainda pendentes de processamento.",
       },
       {
         label: "Ignorados",
         value: policyCounts.ignored,
         color: "text-[var(--status-neutral-fg)]",
         href: filesPath({ status: "ignored" }),
+        hint: "Arquivos marcados como ignorados pela operação.",
       },
     ];
   }, [insights, total, stats, policyCounts]);
@@ -128,124 +189,111 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen p-6">
       <div className="mx-auto max-w-7xl">
-        <div className="flex items-center justify-between mb-8">
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-[var(--foreground)]">Painel</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">Acompanhe e opere o pipeline ETL do DATASUS</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">Resumo operacional do pipeline</p>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
             <ScanButton onScan={load} />
-            <Link href="/policies" className="secondary-link-chip text-xs">
-              Abrir política de processamento
-            </Link>
-            {ago && (
-              <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
-                <span className={`h-1.5 w-1.5 rounded-full ${fetching ? "bg-blue-400 animate-pulse" : "bg-emerald-500"}`} />
+            {ago ? (
+              <span className="flex items-center justify-end gap-1.5 text-xs text-[var(--muted)]">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${fetching ? "animate-pulse bg-blue-400" : "bg-emerald-500"}`}
+                />
                 Atualizado {ago}
               </span>
-            )}
+            ) : null}
           </div>
-        </div>
-        {error && (
+        </header>
+
+        {error ? (
           <p className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-[var(--status-danger-fg)]">
             {error}
           </p>
-        )}
+        ) : null}
 
-        {initialized && insights && insights.status_stage_mismatch_count > 0 && (
-          <p className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-[var(--status-warning-fg)]">
-            Há {insights.status_stage_mismatch_count.toLocaleString("pt-BR")} arquivo(s) em que o status agregado
-            (overall_status) não bate com as etapas registradas (file_stages) para o terminal esperado pela política.
-            {" "}
-            <Link href="/files" className="text-[var(--accent)] underline underline-offset-2">
-              Abrir lista de arquivos
-            </Link>
-            {" "}e compare o detalhe de cada arquivo.
-          </p>
-        )}
-
-        {initialized && insights &&
-          (insights.by_catalog_total_mismatch !== 0 || insights.by_state_total_mismatch !== 0) && (
-          <p className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-[var(--status-warning-fg)]">
-            Divergência de totais: catálogo {insights.by_catalog_total_mismatch.toLocaleString("pt-BR")}, estado{" "}
-            {insights.by_state_total_mismatch.toLocaleString("pt-BR")} (soma dos buckets vs total_files). Verifique dados agregados.
-          </p>
-        )}
-
-        {/* KPI cards */}
-        {!initialized ? (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-8">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="animate-pulse bg-[var(--border)] rounded-2xl h-24" />
-            ))}
+        <section aria-labelledby="resumo-heading" className="mb-8">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h2 id="resumo-heading" className="text-sm font-medium text-[var(--foreground)]">
+              Resumo
+            </h2>
+            {resumoHint ? <ContextualHint text={resumoHint} /> : null}
           </div>
-        ) : (
-          <>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-3">
-            {kpiCards.map((card) => (
-              <Link key={card.label} href={card.href} className="glass-card rounded-2xl p-4 hover:ring-1 hover:ring-[var(--accent)] transition">
-                <p className="text-sm text-[var(--muted)]">{card.label}</p>
-                <p className={`text-3xl font-bold ${card.color} mt-1`}>{card.value.toLocaleString()}</p>
+          {!initialized ? (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-24 animate-pulse rounded-2xl bg-[var(--border)]" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+              {kpiCards.map((card) => (
+                <div
+                  key={card.label}
+                  className={`glass-card relative rounded-2xl p-4 transition hover:ring-1 hover:ring-[var(--accent)] ${card.cardClassName ?? ""}`}
+                >
+                  {card.hint ? (
+                    <div className="absolute right-3 top-3 z-10">
+                      <ContextualHint text={card.hint} />
+                    </div>
+                  ) : null}
+                  <Link href={card.href} className={card.hint ? "block pr-7" : "block"}>
+                    <p className="min-w-0 text-sm text-[var(--muted)]">{card.label}</p>
+                    <p className={`mt-1 text-3xl font-bold tabular-nums ${card.color}`}>
+                      {card.value.toLocaleString("pt-BR")}
+                    </p>
+                  </Link>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section aria-label="Funil de progresso" className="mb-8">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {[
+              {
+                label: "Download",
+                value:
+                  (stats?.downloaded ?? 0) +
+                  (stats?.converting_csv ?? 0) +
+                  (stats?.csv_ready ?? 0) +
+                  (stats?.converting_parquet ?? 0) +
+                  (stats?.parquet_ready ?? 0),
+                href: filesPathMultiStatus(["downloaded", "converting_csv", "csv_ready", "converting_parquet", "parquet_ready"]),
+              },
+              {
+                label: "CSV",
+                value: (stats?.csv_ready ?? 0) + (stats?.converting_parquet ?? 0) + (stats?.parquet_ready ?? 0),
+                href: filesPathMultiStatus(["csv_ready", "converting_parquet", "parquet_ready"]),
+              },
+              {
+                label: "Parquet",
+                value: stats?.parquet_ready ?? 0,
+                href: filesPath({ status: "parquet_ready" }),
+              },
+            ].map((s) => (
+              <Link
+                key={s.label}
+                href={s.href}
+                className="glass-card rounded-2xl p-4 transition hover:ring-1 hover:ring-[var(--accent)]"
+              >
+                <p className="text-sm text-[var(--muted)]">{s.label}</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-[var(--foreground)]">
+                  {s.value.toLocaleString("pt-BR")}
+                </p>
               </Link>
             ))}
           </div>
-          {insights?.stage_done_counts ? (
-            <p className="mb-8 text-[11px] leading-relaxed text-[var(--muted)]">
-              Etapas concluídas no registro (file_stages): download{" "}
-              {insights.stage_done_counts.download.toLocaleString("pt-BR")}, CSV{" "}
-              {insights.stage_done_counts.csv_conversion.toLocaleString("pt-BR")}, Parquet{" "}
-              {insights.stage_done_counts.parquet_conversion.toLocaleString("pt-BR")}.
-            </p>
-          ) : (
-            <div className="mb-8" />
-          )}
-          </>
-        )}
+        </section>
 
-        {/* Stage breakdown — overall_status only */}
-        <div className="mb-2">
-          <h2 className="text-sm font-medium text-[var(--foreground)]">Funil por status agregado</h2>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            Contagens abaixo usam apenas <span className="font-mono text-[11px]">overall_status</span> do arquivo — não são o
-            mesmo critério do cartão “Pipeline OK (política)”, que usa etapas e a política global.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-8">
-          {[
-            {
-              label: "Downloads concluídos",
-              value:
-                (stats?.downloaded ?? 0) +
-                (stats?.converting_csv ?? 0) +
-                (stats?.csv_ready ?? 0) +
-                (stats?.converting_parquet ?? 0) +
-                (stats?.parquet_ready ?? 0),
-              href: filesPathMultiStatus(["downloaded", "converting_csv", "csv_ready", "converting_parquet", "parquet_ready"]),
-            },
-            {
-              label: "CSV pronto",
-              value: (stats?.csv_ready ?? 0) + (stats?.converting_parquet ?? 0) + (stats?.parquet_ready ?? 0),
-              href: filesPathMultiStatus(["csv_ready", "converting_parquet", "parquet_ready"]),
-            },
-            {
-              label: "Parquet pronto",
-              value: stats?.parquet_ready ?? 0,
-              href: filesPath({ status: "parquet_ready" }),
-            },
-          ].map((s) => (
-            <Link key={s.label} href={s.href} className="glass-card rounded-2xl p-4 hover:ring-1 hover:ring-[var(--accent)] transition">
-              <p className="text-sm text-[var(--muted)]">{s.label}</p>
-              <p className="text-2xl font-semibold text-[var(--foreground)]">{s.value.toLocaleString()}</p>
-            </Link>
-          ))}
-        </div>
-
-        <section className="glass-card-strong rounded-2xl p-4 mb-8">
-          <h2 className="mb-3 text-lg font-semibold text-[var(--foreground)]">Mapa do Brasil por tamanho total</h2>
+        <section className="glass-card-strong mb-8 rounded-2xl p-4">
+          <h2 className="mb-3 text-lg font-semibold text-[var(--foreground)]">Volume por estado</h2>
           <BrazilStateMap states={insights?.by_state ?? []} />
         </section>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 mb-8">
+        <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section className="glass-card-strong rounded-2xl p-4">
             <h2 className="mb-3 text-lg font-semibold text-[var(--foreground)]">Catálogo</h2>
             <ul className="space-y-2">
@@ -259,7 +307,7 @@ export default function DashboardPage() {
                           {formatBytes(item.total_size_bytes)}
                         </span>
                         <span className="block text-xs text-[var(--muted)]">
-                          ({item.count.toLocaleString("pt-BR")} arquivos)
+                          {item.count.toLocaleString("pt-BR")} arquivos
                         </span>
                       </div>
                     </div>
@@ -288,7 +336,7 @@ export default function DashboardPage() {
                           {formatBytes(item.total_size_bytes)}
                         </span>
                         <span className="block text-xs text-[var(--muted)]">
-                          ({item.count.toLocaleString("pt-BR")} arquivos)
+                          {item.count.toLocaleString("pt-BR")} arquivos
                         </span>
                       </div>
                     </div>
@@ -306,25 +354,26 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Recent failures */}
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-[var(--foreground)]">Falhas recentes</h2>
+          <section aria-labelledby="falhas-heading">
+            <h2 id="falhas-heading" className="mb-3 text-lg font-semibold text-[var(--foreground)]">
+              Falhas recentes
+            </h2>
             {!initialized ? (
               <div className="space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="animate-pulse bg-[var(--border)] rounded-2xl h-14" />
+                  <div key={i} className="h-14 animate-pulse rounded-2xl bg-[var(--border)]" />
                 ))}
               </div>
             ) : failed.length === 0 ? (
-              <p className="glass-card rounded-2xl p-4 text-sm text-[var(--muted)]">Sem falhas recentes</p>
+              <p className="glass-card rounded-2xl p-4 text-sm text-[var(--muted)]">Nenhuma falha recente</p>
             ) : (
               <ul className="space-y-2">
                 {failed.map((f, idx) => (
                   <li
                     key={`${f.id}-${f.remote_timestamp ?? f.last_seen_at}-${idx}`}
-                    className="glass-card rounded-2xl p-3 flex items-center justify-between"
+                    className="glass-card flex items-center justify-between rounded-2xl p-3"
                   >
-                    <div>
+                    <div className="min-w-0">
                       <Link href={`/files/${f.id}`} className="text-sm font-medium text-[var(--accent)] hover:underline">
                         {f.filename}
                       </Link>
@@ -339,18 +388,19 @@ export default function DashboardPage() {
             )}
           </section>
 
-          {/* Recent activity */}
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-[var(--foreground)]">Atividade recente</h2>
-              <Link href="/files" className="secondary-link-chip">
-                Ver todos os arquivos
+          <section aria-labelledby="atividade-heading">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 id="atividade-heading" className="text-lg font-semibold text-[var(--foreground)]">
+                Atividade recente
+              </h2>
+              <Link href="/files" className="secondary-link-chip shrink-0">
+                Todos os arquivos
               </Link>
             </div>
             {!initialized ? (
               <div className="space-y-2">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="animate-pulse bg-[var(--border)] rounded-2xl h-14" />
+                  <div key={i} className="h-14 animate-pulse rounded-2xl bg-[var(--border)]" />
                 ))}
               </div>
             ) : (
@@ -358,9 +408,9 @@ export default function DashboardPage() {
                 {recent.map((f, idx) => (
                   <li
                     key={`${f.id}-${f.remote_timestamp ?? f.last_seen_at}-${idx}`}
-                    className="glass-card rounded-2xl p-3 flex items-center justify-between"
+                    className="glass-card flex items-center justify-between rounded-2xl p-3"
                   >
-                    <div>
+                    <div className="min-w-0">
                       <Link href={`/files/${f.id}`} className="text-sm font-medium text-[var(--accent)] hover:underline">
                         {f.filename}
                       </Link>
