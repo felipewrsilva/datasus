@@ -428,6 +428,228 @@ type UpsertFTPParams struct {
 	RootPath        string
 }
 
+// FileSnapshotRow is the minimum projection needed by the FTP scanner to
+// classify each entry against the existing catalog without re-reading every
+// column of the files table.
+type FileSnapshotRow struct {
+	ID              string
+	Filename        string
+	SizeBytes       *int64
+	RemoteTimestamp *time.Time
+	OverallStatus   domain.OverallStatus
+}
+
+// ListSnapshotByFTPDir streams the lightweight projection of files for a given
+// ftp_dir. Used by the batched scanner to diff against incoming FTP entries.
+func (r *FileRepository) ListSnapshotByFTPDir(ctx context.Context, dir string) (map[string]FileSnapshotRow, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, filename, size_bytes, remote_timestamp, overall_status
+		FROM files
+		WHERE ftp_dir = $1`, dir)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot by ftp_dir: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]FileSnapshotRow, 1024)
+	for rows.Next() {
+		var item FileSnapshotRow
+		if err := rows.Scan(&item.ID, &item.Filename, &item.SizeBytes, &item.RemoteTimestamp, &item.OverallStatus); err != nil {
+			return nil, err
+		}
+		out[item.Filename] = item
+	}
+	return out, rows.Err()
+}
+
+// BulkUpsertResult reports the outcome of a BulkUpsertFromFTP call.
+type BulkUpsertResult struct {
+	IDs            []string
+	IsNew          []bool
+	ContentChanged []bool
+}
+
+// BulkUpsertFromFTP inserts or updates many rows discovered during an FTP scan
+// using one round trip. Semantics match UpsertFromFTP per row: ON CONFLICT on
+// the unique filename, content_changed reflects a difference in size or
+// remote_timestamp.
+func (r *FileRepository) BulkUpsertFromFTP(ctx context.Context, params []UpsertFTPParams) (BulkUpsertResult, error) {
+	if len(params) == 0 {
+		return BulkUpsertResult{}, nil
+	}
+
+	filenames := make([]string, len(params))
+	catalogs := make([]string, len(params))
+	states := make([]string, len(params))
+	years := make([]int32, len(params))
+	months := make([]int32, len(params))
+	segments := make([]*string, len(params))
+	ftpDirs := make([]string, len(params))
+	ftpPaths := make([]string, len(params))
+	sizes := make([]*int64, len(params))
+	checksums := make([]*string, len(params))
+	timestamps := make([]*time.Time, len(params))
+	roots := make([]string, len(params))
+
+	for i, p := range params {
+		filenames[i] = p.Filename
+		catalogs[i] = p.Catalog
+		states[i] = p.State
+		years[i] = int32(p.Year)
+		months[i] = int32(p.Month)
+		segments[i] = p.Segment
+		ftpDirs[i] = p.FTPDir
+		ftpPaths[i] = p.FTPPath
+		sizes[i] = p.SizeBytes
+		checksums[i] = p.RemoteChecksum
+		timestamps[i] = p.RemoteTimestamp
+		roots[i] = p.RootPath
+	}
+
+	const q = `
+		WITH input AS (
+			SELECT *
+			FROM unnest(
+				$1::text[],   $2::text[], $3::text[], $4::int[], $5::int[],
+				$6::text[],   $7::text[], $8::text[], $9::bigint[],
+				$10::text[],  $11::timestamptz[], $12::text[]
+			) AS t(filename, catalog, state, year, month, segment,
+			       ftp_dir, ftp_path, size_bytes, remote_checksum,
+			       remote_timestamp, root_path)
+		),
+		upsert AS (
+			INSERT INTO files (filename, catalog, state, year, month, segment,
+			                   ftp_dir, ftp_path, size_bytes, remote_checksum,
+			                   remote_timestamp, root_path, last_seen_at)
+			SELECT filename, catalog, state, year, month,
+			       NULLIF(segment, ''),
+			       ftp_dir, ftp_path, size_bytes, remote_checksum,
+			       remote_timestamp, root_path, now()
+			FROM input
+			ON CONFLICT (filename) DO UPDATE
+			   SET ftp_path         = EXCLUDED.ftp_path,
+			       size_bytes       = EXCLUDED.size_bytes,
+			       remote_checksum  = EXCLUDED.remote_checksum,
+			       remote_timestamp = EXCLUDED.remote_timestamp,
+			       segment          = EXCLUDED.segment,
+			       last_seen_at     = now(),
+			       updated_at       = now()
+			RETURNING id, filename, (xmax = 0) AS is_new,
+			          (remote_checksum IS DISTINCT FROM (SELECT remote_checksum FROM input WHERE input.filename = files.filename)
+			            OR remote_timestamp IS DISTINCT FROM (SELECT remote_timestamp FROM input WHERE input.filename = files.filename)
+			          ) AS content_changed
+		)
+		SELECT id, filename, is_new, content_changed FROM upsert`
+
+	segArg := make([]string, len(segments))
+	for i, s := range segments {
+		if s != nil {
+			segArg[i] = *s
+		}
+	}
+
+	chksArg := make([]any, len(checksums))
+	for i, s := range checksums {
+		if s == nil {
+			chksArg[i] = nil
+		} else {
+			chksArg[i] = *s
+		}
+	}
+	tsArg := make([]any, len(timestamps))
+	for i, t := range timestamps {
+		if t == nil {
+			tsArg[i] = nil
+		} else {
+			tsArg[i] = *t
+		}
+	}
+	sizeArg := make([]any, len(sizes))
+	for i, s := range sizes {
+		if s == nil {
+			sizeArg[i] = nil
+		} else {
+			sizeArg[i] = *s
+		}
+	}
+
+	rows, err := r.db.Query(ctx, q,
+		filenames, catalogs, states, years, months,
+		segArg, ftpDirs, ftpPaths, sizeArg,
+		chksArg, tsArg, roots,
+	)
+	if err != nil {
+		return BulkUpsertResult{}, fmt.Errorf("bulk upsert files: %w", err)
+	}
+	defer rows.Close()
+
+	out := BulkUpsertResult{
+		IDs:            make([]string, 0, len(params)),
+		IsNew:          make([]bool, 0, len(params)),
+		ContentChanged: make([]bool, 0, len(params)),
+	}
+	type row struct {
+		id, filename string
+		isNew        bool
+		changed      bool
+	}
+	byName := make(map[string]row, len(params))
+	for rows.Next() {
+		var rr row
+		if err := rows.Scan(&rr.id, &rr.filename, &rr.isNew, &rr.changed); err != nil {
+			return BulkUpsertResult{}, err
+		}
+		byName[rr.filename] = rr
+	}
+	if err := rows.Err(); err != nil {
+		return BulkUpsertResult{}, err
+	}
+	for _, p := range params {
+		rr, ok := byName[p.Filename]
+		if !ok {
+			return BulkUpsertResult{}, fmt.Errorf("bulk upsert: missing returning row for %q", p.Filename)
+		}
+		out.IDs = append(out.IDs, rr.id)
+		out.IsNew = append(out.IsNew, rr.isNew)
+		out.ContentChanged = append(out.ContentChanged, rr.isNew || rr.changed)
+	}
+	return out, nil
+}
+
+// TouchLastSeen bumps last_seen_at to now() for the given file IDs in one
+// statement. Used to keep freshness on unchanged files without rewriting them.
+func (r *FileRepository) TouchLastSeen(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, `
+		UPDATE files
+		SET last_seen_at = now()
+		WHERE id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return fmt.Errorf("touch last_seen: %w", err)
+	}
+	return nil
+}
+
+// BulkSetIgnoredByPolicy moves the given IDs to overall_status='ignored' if and
+// only if they are still in a status that should be moved (pending/downloaded/csv_ready).
+// Returns the number of rows actually updated.
+func (r *FileRepository) BulkSetIgnoredByPolicy(ctx context.Context, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := r.db.Exec(ctx, `
+		UPDATE files
+		SET overall_status = 'ignored', updated_at = now()
+		WHERE id = ANY($1::uuid[])
+		  AND overall_status IN ('pending', 'downloaded', 'csv_ready')`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("bulk set ignored: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *FileRepository) UpdateStatus(ctx context.Context, id string, status domain.OverallStatus) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE files SET overall_status=$2, updated_at=now() WHERE id=$1`, id, string(status))

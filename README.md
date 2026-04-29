@@ -2,81 +2,168 @@
 
 ETL pipeline for Brazilian DATASUS datasets, focused on scanning FTP folders, downloading `.dbc` files, converting them to CSV and Parquet, and exposing operational controls through an API and web UI.
 
-## What this project includes
+## O que tem aqui
 
-- Go API (`cmd/api`) for health, metrics, file queries, and pipeline triggers.
-- Go worker (`cmd/worker`) with async processing queues.
-- PostgreSQL for metadata, stages, logs, and job orchestration.
-- Next.js web app (`web`) to inspect files and statuses.
-- Docker Compose stack for local full environment.
+- Go API (`cmd/api`) para health, métricas, consulta de arquivos e triggers do pipeline.
+- Go worker (`cmd/worker`) com filas de processamento assíncrono.
+- PostgreSQL para metadados, estágios, logs e orquestração de jobs.
+- Next.js web app (`web`) para inspecionar arquivos e status.
+- Docker Compose stack para ambiente local completo.
 
-## Architecture (high level)
+## Arquitetura (visão geral)
 
-1. API process scans configured DATASUS FTP paths on startup and daily schedule.
-2. New files are registered in Postgres and jobs are enqueued.
-3. Worker pools process stages:
+1. A API varre os caminhos FTP configurados na inicialização e em schedule diário.
+2. Novos arquivos são registrados no Postgres e jobs são enfileirados.
+3. Worker pools processam os estágios:
    - download `.dbc`
-   - convert to CSV
-   - convert to Parquet
-4. API and web app expose status, logs, and manual actions.
+   - conversão para CSV
+   - conversão para Parquet
+4. API e web app expõem status, logs e ações manuais.
 
-## Requirements
+## Requisitos
 
 - Docker + Docker Compose
 
-## Quick start (Docker, recommended)
+## Quick start
 
-1. Create local environment file:
+1. Crie o arquivo de ambiente local:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Start everything:
+2. Suba tudo:
 
 ```bash
 docker compose up --build -d
 ```
 
-3. Open services:
+3. Acesse os serviços:
 
-- API: <http://localhost:8080/api/health>
 - Web: <http://localhost:3002>
+- API: <http://localhost:8080/api/health>
 - Metabase: <http://localhost:3001>
 
-### Metabase (first run)
+### Metabase (primeiro acesso)
 
-Compose provisions a dedicated Postgres database `metabase` for Metabase’s own metadata (pipeline data stays in `datasus`). The app DB connection uses `sslmode=disable` so the container can reach Postgres without TLS.
+O Compose provisiona um banco Postgres dedicado `metabase` para os metadados internos do Metabase (os dados do pipeline ficam em `datasus`). A conexão usa `sslmode=disable`.
 
-After `docker compose up --build -d`, run the setup helper once (creates an admin user and registers the **DATASUS Pipeline** database pointing at host `db`):
+Após o `docker compose up --build -d`, rode o helper de setup uma vez:
 
 ```bash
 make metabase-setup
-# or: python scripts/metabase_setup.py
+# ou: python scripts/metabase_setup.py
 ```
 
-Defaults (override with env vars if needed):
+Credenciais padrão (sobrescreva com env vars se precisar):
 
 - URL: `http://localhost:3001` (`METABASE_URL`)
 - Admin email: `admin@datasus.local` (`METABASE_ADMIN_EMAIL`)
-- Admin password: `MetabaseLocal#2026` (`METABASE_ADMIN_PASSWORD`; Metabase rejects overly simple passwords)
+- Admin password: `MetabaseLocal#2026` (`METABASE_ADMIN_PASSWORD`)
 
-If Metabase was already configured before this change, you may need to run the script again or finish the in-browser wizard; old Metabase tables left inside `datasus` can be ignored or removed manually.
+Para adicionar o banco manualmente: PostgreSQL, host **`db`**, porta **5432**, banco **`datasus`**, usuário **`datasus`**, senha **`datasus`**, SSL desligado.
 
-To add the pipeline DB by hand instead: PostgreSQL, host **`db`**, port **5432**, database **`datasus`**, user **`datasus`**, password **`datasus`**, SSL off.
+---
 
-## Useful commands
+## Guia de uso da interface web
 
-From repository root:
+### Painel principal
 
-- `make build` - Build all Go packages.
-- `make test` - Run unit tests.
-- `make test-integration` - Run integration tests.
-- `make up` - Start Docker stack.
-- `make down` - Stop Docker stack.
-- `make logs` - Follow compose logs.
+A primeira tela é o **Painel** — o centro de controle do pipeline.
 
-## Main API endpoints
+![Painel principal](docs/screenshots/dashboard.png)
+
+| Bloco | O que mostra |
+|---|---|
+| **Resumo** | Contadores totais: arquivos baixados, convertidos para CSV e Parquet |
+| **Volume por estado** | Tamanho acumulado de arquivos por UF |
+| **Catálogo / Estado** | Distribuição dos arquivos por catálogo e estado |
+| **Falhas recentes** | Últimos jobs que terminaram com erro |
+| **Atividade recente** | Feed de eventos do pipeline em tempo real |
+
+Para forçar uma varredura do FTP sem esperar o cron diário, clique em **Varrer FTP** no topo do painel. A varredura é assíncrona — os novos arquivos aparecem na aba Arquivos assim que o worker terminar.
+
+---
+
+### Arquivos
+
+A aba **Arquivos** lista todos os arquivos registrados, com status e rastreabilidade por estado.
+
+![Lista de arquivos](docs/screenshots/files.png)
+
+**Filtrar por status:**
+
+| Filtro | O que inclui |
+|---|---|
+| **Prontos para uso** | Arquivos com Parquet gerado (`parquet_ready`) |
+| **Em processamento** | Download, conversão CSV e Parquet em andamento |
+| **Todo o histórico** | Todos os estados desde o download |
+
+**Filtrar por estado:** clique em qualquer UF na lista lateral. A URL reflete o filtro — dá para bookmarkar ou compartilhar:
+
+```
+/files?state=SP
+/files?status=parquet_ready
+```
+
+---
+
+### Políticas de processamento
+
+A aba **Políticas** controla o que o pipeline processa e como.
+
+![Página de políticas](docs/screenshots/policies.png)
+
+A configuração segue quatro passos:
+
+**1. Etapas de processamento** — escolha quais etapas o sistema executa. O encadeamento é fixo:
+
+```
+Download → CSV → Parquet
+```
+
+Desligar uma etapa faz o worker processar apenas o que já está no estágio anterior.
+
+**2. Diretórios de armazenamento** — opcional. Se deixar em branco, o sistema usa os diretórios padrão da variável `STORAGE_ROOT`.
+
+| Campo | Caminho padrão |
+|---|---|
+| Pasta de Download | `STORAGE_ROOT/download` |
+| Pasta de CSV | `STORAGE_ROOT/csv` |
+| Pasta de Parquet | `STORAGE_ROOT/parquet` |
+
+**3. Catálogos** — selecione ao menos um. Sem catálogo, nenhum job é enfileirado.
+
+**4. Período** — marque anos inteiros ou meses avulsos. Meses sem arquivo disponível no FTP podem ser marcados antecipadamente; o worker os busca assim que o dado aparecer.
+
+O bloco **Resumo** no final da página confirma o estado atual da política antes de salvar.
+
+---
+
+### Acompanhar o progresso
+
+Após configurar a política, volte ao **Painel**:
+
+1. Os contadores de **Resumo** sobem conforme os arquivos avançam nos estágios.
+2. **Atividade recente** mostra cada evento com timestamp.
+3. **Falhas recentes** agrupa erros com contexto para investigar.
+
+Para inspecionar um arquivo específico, abra **Arquivos**, localize o registro e veja os detalhes de cada estágio com logs individuais.
+
+---
+
+## Comandos úteis
+
+Na raiz do repositório:
+
+- `make build` — compila todos os pacotes Go.
+- `make test` — roda os testes unitários.
+- `make test-integration` — roda os testes de integração.
+- `make up` — sobe o stack Docker.
+- `make down` — derruba o stack Docker.
+- `make logs` — acompanha os logs do Compose.
+
+## Principais endpoints da API
 
 Base path: `/api`
 
@@ -86,7 +173,7 @@ Base path: `/api`
 - `GET /files/{id}`
 - `GET /files/{id}/stages`
 - `GET /stats`
-- `POST /scan` (manual trigger, async)
+- `POST /scan` (trigger manual, assíncrono)
 - `GET /scan/status`
 - `POST /download`
 - `POST /download/mask`
@@ -96,10 +183,9 @@ Base path: `/api`
 - `POST /convert/parquet/mask`
 - `POST /purge`
 
-## Configuration
+## Configuração
 
-Environment variables are documented in `.env.example`.
-Important ones:
+Variáveis de ambiente documentadas em `.env.example`. As mais relevantes:
 
 - `FTP_HOST`, `FTP_PATHS`, `FTP_CONN_POOL`
 - `DATABASE_URL`
@@ -109,17 +195,12 @@ Important ones:
 - `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`, `STUCK_JOB_TIMEOUT`
 - `LOG_LEVEL`, `API_PORT`
 
-## Date display standard (UI)
+## Padrão de datas (UI)
 
-All dates shown to users in the web UI must use Brazilian format with locale `pt-BR`.
+Todas as datas exibidas na interface usam formato brasileiro com locale `pt-BR`:
 
-- Date only: `dd/MM/yyyy`
-- Date and time default: `dd/MM/yyyy HH:mm`
-- Detailed logs and audits: `dd/MM/yyyy HH:mm:ss`
+- Só data: `dd/MM/yyyy`
+- Data e hora: `dd/MM/yyyy HH:mm`
+- Logs e auditorias: `dd/MM/yyyy HH:mm:ss`
 
-Rules:
-
-- API contracts keep technical timestamp values as ISO/RFC3339.
-- UI formatting must always use shared helpers from `web/src/lib/dateFormat.ts`.
-- Never render ISO timestamps directly to users.
-- Timezone for display follows the local timezone of each user browser.
+Contratos de API mantêm timestamps em ISO/RFC3339. A formatação para exibição usa os helpers em `web/src/lib/dateFormat.ts`. O fuso exibido segue o fuso local do browser do usuário.

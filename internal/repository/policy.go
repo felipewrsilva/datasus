@@ -516,6 +516,109 @@ func (r *PolicyRepository) PolicyAllows(ctx context.Context, catalog string, yea
 	return monthSelected, nil
 }
 
+// PolicySnapshot is an in-memory copy of the global selection used to evaluate
+// policy decisions for many files in a single scan without per-row round trips.
+type PolicySnapshot struct {
+	HasSelection bool
+	catalogs     map[string]struct{}
+	years        map[int]struct{}
+	months       map[int]map[int]struct{}
+}
+
+// Allows reports whether (catalog, year, month) is selected by the snapshot.
+// Mirrors PolicyAllows: empty selection denies all; year selected covers all
+// months of that year; otherwise the (year, month) pair must be selected.
+func (s PolicySnapshot) Allows(catalog string, year, month int) bool {
+	if !s.HasSelection {
+		return false
+	}
+	cat := normalizeCatalog(catalog)
+	if _, ok := s.catalogs[cat]; !ok {
+		return false
+	}
+	if _, ok := s.years[year]; ok {
+		return true
+	}
+	if mset, ok := s.months[year]; ok {
+		_, ok := mset[month]
+		return ok
+	}
+	return false
+}
+
+// LoadPolicySnapshot loads catalogs/years/months selections in three queries.
+// Returned snapshot has HasSelection=false when no catalog or no period is set.
+func (r *PolicyRepository) LoadPolicySnapshot(ctx context.Context) (PolicySnapshot, error) {
+	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
+		return PolicySnapshot{}, err
+	}
+	snap := PolicySnapshot{
+		catalogs: map[string]struct{}{},
+		years:    map[int]struct{}{},
+		months:   map[int]map[int]struct{}{},
+	}
+
+	catRows, err := r.db.Query(ctx, `SELECT catalog::text FROM download_policy_catalogs`)
+	if err != nil {
+		return PolicySnapshot{}, fmt.Errorf("load policy catalogs: %w", err)
+	}
+	for catRows.Next() {
+		var c string
+		if err := catRows.Scan(&c); err != nil {
+			catRows.Close()
+			return PolicySnapshot{}, err
+		}
+		snap.catalogs[normalizeCatalog(c)] = struct{}{}
+	}
+	catRows.Close()
+	if err := catRows.Err(); err != nil {
+		return PolicySnapshot{}, err
+	}
+
+	yearRows, err := r.db.Query(ctx, `SELECT year FROM download_policy_years`)
+	if err != nil {
+		return PolicySnapshot{}, fmt.Errorf("load policy years: %w", err)
+	}
+	for yearRows.Next() {
+		var y int
+		if err := yearRows.Scan(&y); err != nil {
+			yearRows.Close()
+			return PolicySnapshot{}, err
+		}
+		snap.years[y] = struct{}{}
+	}
+	yearRows.Close()
+	if err := yearRows.Err(); err != nil {
+		return PolicySnapshot{}, err
+	}
+
+	monthRows, err := r.db.Query(ctx, `SELECT year, month FROM download_policy_months`)
+	if err != nil {
+		return PolicySnapshot{}, fmt.Errorf("load policy months: %w", err)
+	}
+	for monthRows.Next() {
+		var y, m int
+		if err := monthRows.Scan(&y, &m); err != nil {
+			monthRows.Close()
+			return PolicySnapshot{}, err
+		}
+		set := snap.months[y]
+		if set == nil {
+			set = map[int]struct{}{}
+			snap.months[y] = set
+		}
+		set[m] = struct{}{}
+	}
+	monthRows.Close()
+	if err := monthRows.Err(); err != nil {
+		return PolicySnapshot{}, err
+	}
+
+	hasPeriod := len(snap.years) > 0 || len(snap.months) > 0
+	snap.HasSelection = len(snap.catalogs) > 0 && hasPeriod
+	return snap, nil
+}
+
 // PendingAndIgnoredCounts returns counts from persisted status values.
 func (r *PolicyRepository) PendingAndIgnoredCounts(ctx context.Context) (int64, int64, error) {
 	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
