@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Eraser, ListChecks } from "lucide-react";
+import { ChevronDown, ChevronRight, Eraser, ListChecks } from "lucide-react";
 import { getPolicies, putPolicies } from "@/lib/api";
 import type { YearMonth } from "@/lib/types";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
@@ -685,13 +685,24 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
                       />
                       <span>{year}</span>
                     </label>
-                    <button
-                      type="button"
-                      className="secondary-link-chip text-xs"
-                      onClick={() => toggleYearExpanded(year)}
+                    <ContextualHint
+                      text={expandedYears[year] ? "Ocultar meses" : "Mostrar meses"}
+                      ariaLabel={expandedYears[year] ? "Ocultar meses" : "Mostrar meses"}
                     >
-                      {expandedYears[year] ? "Ocultar meses" : "Mostrar meses"}
-                    </button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => toggleYearExpanded(year)}
+                        className={`h-9 w-9 shrink-0 rounded-xl p-0 text-[var(--muted)] hover:text-[var(--foreground)] active:scale-[0.97] ${styles.actionIconButton}`}
+                      >
+                        {expandedYears[year] ? (
+                          <ChevronDown size={16} aria-hidden="true" />
+                        ) : (
+                          <ChevronRight size={16} aria-hidden="true" />
+                        )}
+                      </Button>
+                    </ContextualHint>
                   </div>
                   {expandedYears[year] && (
                     <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
