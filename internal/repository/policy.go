@@ -361,12 +361,7 @@ func validateYearMonth(ym YearMonth) error {
 }
 
 func validateProcessingStages(stages ProcessingStages) error {
-	if stages.EnableCSV && !stages.EnableDownload {
-		return fmt.Errorf("invalid processing policy: csv requires download enabled")
-	}
-	if stages.EnableParquet && !stages.EnableDownload {
-		return fmt.Errorf("invalid processing policy: parquet requires download enabled")
-	}
+	_ = stages
 	return nil
 }
 

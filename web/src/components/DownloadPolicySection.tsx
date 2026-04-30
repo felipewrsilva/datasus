@@ -252,22 +252,13 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
 
   const toggleDownload = (checked: boolean) => {
     setEnableDownload(checked);
-    if (!checked) {
-      setEnableCSV(false);
-      setEnableParquet(false);
-    }
   };
 
   const toggleCSV = (checked: boolean) => {
-    if (!enableDownload && checked) return;
     setEnableCSV(checked);
-    if (!checked) {
-      setEnableParquet(false);
-    }
   };
 
   const toggleParquet = (checked: boolean) => {
-    if ((!enableDownload || !enableCSV) && checked) return;
     setEnableParquet(checked);
   };
 
@@ -437,7 +428,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4 lg:col-span-2">
           <h3 className="text-base font-semibold text-[var(--foreground)]">1. Etapas de processamento</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">
-            Escolha quais etapas o sistema pode executar. O encadeamento segue Download, CSV, Parquet.
+            Escolha quais etapas o sistema pode executar. Cada etapa funciona de forma independente.
           </p>
           <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
             <label className="flex cursor-pointer items-center justify-between rounded-xl border border-[var(--border)]/70 bg-[var(--background)]/20 px-3 py-2 text-sm">
@@ -455,7 +446,6 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
                 type="checkbox"
                 className="rounded"
                 checked={enableCSV}
-                disabled={!enableDownload}
                 onChange={(e) => toggleCSV(e.target.checked)}
               />
             </label>
@@ -465,7 +455,6 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
                 type="checkbox"
                 className="rounded"
                 checked={enableParquet}
-                disabled={!enableDownload || !enableCSV}
                 onChange={(e) => toggleParquet(e.target.checked)}
               />
             </label>

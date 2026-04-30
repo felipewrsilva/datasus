@@ -9,7 +9,6 @@ import (
 
 	"datasus/internal/domain"
 	"datasus/internal/observability"
-	"datasus/internal/queue"
 	"datasus/internal/repository"
 )
 
@@ -169,11 +168,9 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 		}
 	}
 
-	now := time.Now()
 	var unchangedTouchIDs []string
 	var ignoreIDs []string
-	var initStageIDs []string
-	var enqItems []queue.EnqueueItem
+	var reconcileIDs []string
 	for _, c := range classifieds {
 		var id string
 		switch c.k {
@@ -187,7 +184,6 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 			}
 		}
 		contentChanged := c.k != kindUnchanged
-		stage, shouldEnqueue := nextStageFor(c.prevStatus, contentChanged)
 		switch {
 		case !c.allowByPolicy:
 			result.SkippedByPolicy++
@@ -195,12 +191,8 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 			if shouldMoveToIgnored(c.prevStatus) {
 				ignoreIDs = append(ignoreIDs, id)
 			}
-		case shouldEnqueue:
-			initStageIDs = append(initStageIDs, id)
-			enqItems = append(enqItems, queue.EnqueueItem{
-				FileID: id, Stage: stage, AvailableAt: now,
-			})
-			result.Enqueued++
+		case contentChanged || c.k == kindUnchanged || c.k == kindNew:
+			reconcileIDs = append(reconcileIDs, id)
 		}
 		switch c.k {
 		case kindUnchanged:
@@ -228,27 +220,23 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 		return result, err
 	}
 
-	if err := s.runChunkedIDs(ctx, initStageIDs, batchSize, "bulk init stages", &result, func(ids []string) error {
-		err := s.stageRepo.BulkInitStages(ctx, ids)
-		observability.FTPScanDBRoundtrips.Inc()
-		return err
-	}); err != nil {
-		return result, err
-	}
-
-	for start := 0; start < len(enqItems); start += batchSize {
+	for _, fileID := range reconcileIDs {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		end := start + batchSize
-		if end > len(enqItems) {
-			end = len(enqItems)
-		}
-		chunk := enqItems[start:end]
-		if err := s.queue.BulkEnqueue(ctx, chunk); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("bulk enqueue: %v", err))
-		}
+		file, err := s.fileRepo.GetByID(ctx, fileID)
 		observability.FTPScanDBRoundtrips.Inc()
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("reconcile load file: %v", err))
+			continue
+		}
+		enqueued, err := s.reconciler.ReconcileFile(ctx, file)
+		observability.FTPScanDBRoundtrips.Inc()
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("reconcile stages: %v", err))
+			continue
+		}
+		result.Enqueued += enqueued
 	}
 
 	observability.FTPScanFilesUnchanged.Add(float64(len(unchangedTouchIDs)))

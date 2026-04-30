@@ -12,6 +12,7 @@ import (
 
 	"datasus/internal/domain"
 	"datasus/internal/ftp"
+	"datasus/internal/pipeline"
 	"datasus/internal/queue"
 	"datasus/internal/repository"
 	"datasus/internal/storage"
@@ -19,13 +20,14 @@ import (
 
 // Service orchestrates the download stage for a single file.
 type Service struct {
-	ftpClient *ftp.Client
-	fileRepo  *repository.FileRepository
-	stageRepo *repository.StageRepository
-	logRepo   *repository.LogRepository
-	queue     *queue.PostgresQueue
-	policy    *repository.PolicyRepository
-	log       *slog.Logger
+	ftpClient  *ftp.Client
+	fileRepo   *repository.FileRepository
+	stageRepo  *repository.StageRepository
+	logRepo    *repository.LogRepository
+	queue      *queue.PostgresQueue
+	policy     *repository.PolicyRepository
+	reconciler *pipeline.Reconciler
+	log        *slog.Logger
 }
 
 func NewService(
@@ -38,13 +40,14 @@ func NewService(
 	log *slog.Logger,
 ) *Service {
 	return &Service{
-		ftpClient: ftpClient,
-		fileRepo:  fileRepo,
-		stageRepo: stageRepo,
-		logRepo:   logRepo,
-		queue:     q,
-		policy:    policy,
-		log:       log,
+		ftpClient:  ftpClient,
+		fileRepo:   fileRepo,
+		stageRepo:  stageRepo,
+		logRepo:    logRepo,
+		queue:      q,
+		policy:     policy,
+		reconciler: pipeline.NewReconciler(fileRepo, stageRepo, q, policy),
+		log:        log,
 	}
 }
 
@@ -114,27 +117,15 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 	_ = s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusDownloaded)
 	_ = s.stageRepo.SetDone(ctx, file.ID, domain.StageDownload)
 
-	// Enqueue next stages according to processing policy.
-	enableCSV := true
-	enableParquet := true
-	if s.policy != nil {
-		processing, err := s.policy.ProcessingStages(ctx)
-		if err != nil {
-			return s.fail(ctx, file, job, fmt.Errorf("read processing policy: %w", err))
-		}
-		enableCSV = processing.EnableCSV
-		enableParquet = processing.EnableParquet
-	}
-	if enableCSV {
-		_ = s.queue.Enqueue(ctx, file.ID, domain.StageCSVConversion, time.Now())
-	}
-	if enableParquet {
-		_ = s.queue.Enqueue(ctx, file.ID, domain.StageParquetConversion, time.Now())
+	file.DBCPath = &destPath
+	enqueued, err := s.reconciler.ReconcileFile(ctx, file)
+	if err != nil {
+		return s.fail(ctx, file, job, fmt.Errorf("reconcile downstream stages: %w", err))
 	}
 
 	_ = s.logRepo.Insert(ctx, file.ID, domain.StageDownload, "completed",
 		fmt.Sprintf("downloaded in %.1fs, sha256=%s", duration.Seconds(), hash[:8]),
-		map[string]any{"hash": hash, "duration_ms": duration.Milliseconds(), "path": destPath})
+		map[string]any{"hash": hash, "duration_ms": duration.Milliseconds(), "path": destPath, "enqueued": enqueued})
 
 	s.log.Info("download complete",
 		"file", file.Filename, "hash", hash[:8], "duration_ms", duration.Milliseconds())

@@ -14,6 +14,7 @@ import (
 
 	"datasus/internal/domain"
 	"datasus/internal/observability"
+	"datasus/internal/pipeline"
 	"datasus/internal/queue"
 	"datasus/internal/repository"
 	"datasus/internal/storage"
@@ -25,6 +26,7 @@ type Manager struct {
 	stageRepo    *repository.StageRepository
 	logRepo      *repository.LogRepository
 	queue        *queue.PostgresQueue
+	reconciler   *pipeline.Reconciler
 	log          *slog.Logger
 	defaultRoot  string
 	startupDelay time.Duration
@@ -50,6 +52,7 @@ func NewManager(
 		stageRepo:    stageRepo,
 		logRepo:      logRepo,
 		queue:        q,
+		reconciler:   pipeline.NewReconciler(fileRepo, stageRepo, q, policyRepo),
 		log:          log,
 		defaultRoot:  defaultRoot,
 		startupDelay: 3 * time.Second,
@@ -265,8 +268,6 @@ func (m *Manager) run(reason, actor string) {
 		}
 	}
 
-	enqItems := make([]queue.EnqueueItem, 0, len(items))
-	now := time.Now()
 	for _, it := range items {
 		id, ok := nameToID[it.filename]
 		if !ok {
@@ -297,25 +298,17 @@ func (m *Manager) run(reason, actor string) {
 		}
 		_ = m.fileRepo.UpdateStatus(ctx, id, status)
 		c.completed++
-
-		if policy.Processing.EnableCSV && !it.csvExists {
-			enqItems = append(enqItems, queue.EnqueueItem{FileID: id, Stage: domain.StageCSVConversion, AvailableAt: now})
-		}
-		if policy.Processing.EnableParquet && !it.parquetExists {
-			enqItems = append(enqItems, queue.EnqueueItem{FileID: id, Stage: domain.StageParquetConversion, AvailableAt: now})
-		}
-	}
-
-	for start := 0; start < len(enqItems); start += batchSize {
-		end := start + batchSize
-		if end > len(enqItems) {
-			end = len(enqItems)
-		}
-		if err := m.queue.BulkEnqueue(ctx, enqItems[start:end]); err != nil {
-			m.log.Warn("policy sync bulk enqueue failed", "err", err)
+		file, err := m.fileRepo.GetByID(ctx, id)
+		if err != nil {
+			m.log.Warn("policy sync reconcile load failed", "file_id", id, "err", err)
 			continue
 		}
-		c.enqueued += end - start
+		enqueued, err := m.reconciler.ReconcileFile(ctx, file)
+		if err != nil {
+			m.log.Warn("policy sync reconcile failed", "file_id", id, "err", err)
+			continue
+		}
+		c.enqueued += enqueued
 	}
 	_ = m.logRepo.InsertManualAction(context.Background(), "policy_local_sync", nil, actor, map[string]any{
 		"reason":        reason,

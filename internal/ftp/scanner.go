@@ -6,26 +6,27 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"datasus/internal/domain"
 	"datasus/internal/observability"
+	"datasus/internal/pipeline"
 	"datasus/internal/queue"
 	"datasus/internal/repository"
 )
 
 // Scanner walks configured FTP directories, updates discovery metadata, and enqueues pending processing.
 type Scanner struct {
-	client    *Client
-	dirs      []string
-	fileRepo  *repository.FileRepository
-	stageRepo *repository.StageRepository
-	queue     *queue.PostgresQueue
-	policy    *repository.PolicyRepository
-	rootPath  string
-	log       *slog.Logger
-	batchSize int
-	legacy    bool
+	client     *Client
+	dirs       []string
+	fileRepo   *repository.FileRepository
+	stageRepo  *repository.StageRepository
+	queue      *queue.PostgresQueue
+	policy     *repository.PolicyRepository
+	reconciler *pipeline.Reconciler
+	rootPath   string
+	log        *slog.Logger
+	batchSize  int
+	legacy     bool
 }
 
 func NewScanner(
@@ -39,15 +40,16 @@ func NewScanner(
 	log *slog.Logger,
 ) *Scanner {
 	return &Scanner{
-		client:    client,
-		dirs:      dirs,
-		fileRepo:  fileRepo,
-		stageRepo: stageRepo,
-		queue:     q,
-		policy:    policy,
-		rootPath:  rootPath,
-		log:       log,
-		batchSize: 1000,
+		client:     client,
+		dirs:       dirs,
+		fileRepo:   fileRepo,
+		stageRepo:  stageRepo,
+		queue:      q,
+		policy:     policy,
+		reconciler: pipeline.NewReconciler(fileRepo, stageRepo, q, policy),
+		rootPath:   rootPath,
+		log:        log,
+		batchSize:  1000,
 	}
 }
 
@@ -183,7 +185,6 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 		}
 	}
 
-	stage, shouldEnqueue := nextStageFor(file.OverallStatus, changed)
 	if !allowByPolicy {
 		result.SkippedByPolicy++
 		observability.PolicySkipsByState.WithLabelValues(parsed.State, "scanner_legacy").Inc()
@@ -193,14 +194,12 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 			}
 			file.OverallStatus = domain.StatusIgnored
 		}
-	} else if shouldEnqueue {
-		if err := s.stageRepo.InitStages(ctx, file.ID); err != nil {
-			return fmt.Errorf("init stages: %w", err)
+	} else {
+		enqueued, err := s.reconciler.ReconcileFile(ctx, file)
+		if err != nil {
+			return fmt.Errorf("reconcile stages: %w", err)
 		}
-		if err := s.queue.Enqueue(ctx, file.ID, stage, time.Now()); err != nil {
-			return fmt.Errorf("enqueue %s: %w", stage, err)
-		}
-		result.Enqueued++
+		result.Enqueued += enqueued
 	}
 
 	if !changed {
@@ -222,21 +221,5 @@ func shouldMoveToIgnored(status domain.OverallStatus) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func nextStageFor(status domain.OverallStatus, changed bool) (domain.StageName, bool) {
-	if changed {
-		return domain.StageDownload, true
-	}
-	switch status {
-	case domain.StatusPending, domain.StatusFailed:
-		return domain.StageDownload, true
-	case domain.StatusDownloaded:
-		return domain.StageCSVConversion, true
-	case domain.StatusCSVReady:
-		return domain.StageParquetConversion, true
-	default:
-		return "", false
 	}
 }

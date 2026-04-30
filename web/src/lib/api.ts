@@ -370,11 +370,12 @@ function normalizePolicies(raw: unknown): PoliciesResponse {
   };
 }
 
-/** At least one catalog and at least one period row (ano inteiro e/ou mês) saved in policy. */
+/** At least one catalog, state and period row (ano inteiro e/ou mês) saved in policy. */
 export function isPolicySelectionComplete(p: PoliciesResponse): boolean {
   const cats = p.selected_catalogs.length;
+  const states = p.selected_states.length;
   const periodRows = p.selected_periods.years.length + p.selected_periods.months.length;
-  return cats > 0 && periodRows > 0;
+  return cats > 0 && states > 0 && periodRows > 0;
 }
 
 export async function getPolicies(): Promise<PoliciesResponse> {

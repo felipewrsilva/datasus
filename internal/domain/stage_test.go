@@ -16,16 +16,16 @@ func TestStage_Prerequisites(t *testing.T) {
 		{domain.StageDownload, "", false},
 		{domain.StageDownload, domain.StageStatusFailed, false},
 
-		// csv_conversion requires download done
+		// csv_conversion has no hard prerequisite in modular mode
 		{domain.StageCSVConversion, domain.StageStatusDone, false},
-		{domain.StageCSVConversion, domain.StageStatusPending, true},
-		{domain.StageCSVConversion, domain.StageStatusRunning, true},
-		{domain.StageCSVConversion, domain.StageStatusFailed, true},
+		{domain.StageCSVConversion, domain.StageStatusPending, false},
+		{domain.StageCSVConversion, domain.StageStatusRunning, false},
+		{domain.StageCSVConversion, domain.StageStatusFailed, false},
 
-		// parquet_conversion requires download done
+		// parquet_conversion has no hard prerequisite in modular mode
 		{domain.StageParquetConversion, domain.StageStatusDone, false},
-		{domain.StageParquetConversion, domain.StageStatusPending, true},
-		{domain.StageParquetConversion, domain.StageStatusFailed, true},
+		{domain.StageParquetConversion, domain.StageStatusPending, false},
+		{domain.StageParquetConversion, domain.StageStatusFailed, false},
 	}
 
 	for _, tc := range cases {
@@ -84,14 +84,14 @@ func TestStage_IncrementAttempts(t *testing.T) {
 }
 
 func TestPrerequisiteFor(t *testing.T) {
-	prereq, ok := domain.PrerequisiteFor(domain.StageCSVConversion)
-	if !ok || prereq != domain.StageDownload {
-		t.Errorf("csv_conversion prereq: want download/true, got %s/%v", prereq, ok)
+	_, ok := domain.PrerequisiteFor(domain.StageCSVConversion)
+	if ok {
+		t.Error("csv_conversion should have no prerequisite")
 	}
 
-	prereq, ok = domain.PrerequisiteFor(domain.StageParquetConversion)
-	if !ok || prereq != domain.StageDownload {
-		t.Errorf("parquet prereq: want download/true, got %s/%v", prereq, ok)
+	_, ok = domain.PrerequisiteFor(domain.StageParquetConversion)
+	if ok {
+		t.Error("parquet_conversion should have no prerequisite")
 	}
 
 	_, ok = domain.PrerequisiteFor(domain.StageDownload)

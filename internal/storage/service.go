@@ -50,6 +50,12 @@ func FileSize(path string) int64 {
 	return info.Size()
 }
 
+// FileExists reports whether path points to an existing file.
+func FileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

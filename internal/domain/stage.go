@@ -8,8 +8,8 @@ import (
 type StageName string
 
 const (
-	StageDownload         StageName = "download"
-	StageCSVConversion    StageName = "csv_conversion"
+	StageDownload          StageName = "download"
+	StageCSVConversion     StageName = "csv_conversion"
 	StageParquetConversion StageName = "parquet_conversion"
 )
 
@@ -25,23 +25,22 @@ const (
 
 const MaxStageAttempts = 5
 
-// stagePrerequisites defines which stage must be Done before another may run.
-var stagePrerequisites = map[StageName]StageName{
-	StageCSVConversion:     StageDownload,
-	StageParquetConversion: StageDownload,
-}
+// stagePrerequisites can define hard stage dependencies when needed.
+// The modular pipeline keeps this empty so each stage can run independently
+// whenever its required artifact exists.
+var stagePrerequisites = map[StageName]StageName{}
 
 // Stage tracks the execution state of one pipeline stage for a file.
 type Stage struct {
-	ID           string     `json:"id"`
-	FileID       string     `json:"file_id"`
-	Stage        StageName  `json:"stage"`
+	ID           string      `json:"id"`
+	FileID       string      `json:"file_id"`
+	Stage        StageName   `json:"stage"`
 	Status       StageStatus `json:"status"`
-	Attempts     int        `json:"attempts"`
-	StartedAt    *time.Time `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at"`
-	ErrorMessage *string    `json:"error_message"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	Attempts     int         `json:"attempts"`
+	StartedAt    *time.Time  `json:"started_at"`
+	FinishedAt   *time.Time  `json:"finished_at"`
+	ErrorMessage *string     `json:"error_message"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 // CanRun checks whether this stage is eligible to run given the status of its prerequisite.
