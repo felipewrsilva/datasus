@@ -391,12 +391,8 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
   const isDirty = savedSnapshot !== "" && currentPayloadSnapshot !== savedSnapshot;
   const canSave = !saving && !loading && isDirty && !hasPathErrors;
 
-  const selectedCatalogLabels = Array.from(selectedCatalogs)
-    .sort()
-    .map((catalog) => formatCatalogLabel(catalog));
-  const selectedStateLabels = Array.from(selectedStates)
-    .sort()
-    .map((state) => POLICY_STATES.find((item) => item.uf === state)?.label ?? state);
+  const selectedCatalogCodes = Array.from(selectedCatalogs).sort();
+  const selectedStateCodes = Array.from(selectedStates).sort();
   const selectedYearsList = Array.from(selectedYears).sort((a, b) => a - b);
   const selectedMonthsList = Array.from(selectedMonths)
     .map((key) => {
@@ -404,6 +400,17 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
       return { year, month };
     })
     .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
+  const selectedMonthsByYearText = useMemo(() => {
+    if (selectedMonthsList.length === 0) return "nenhum";
+    const grouped = new Map<number, string[]>();
+    for (const item of selectedMonthsList) {
+      const month = String(item.month).padStart(2, "0");
+      grouped.set(item.year, [...(grouped.get(item.year) ?? []), month]);
+    }
+    return Array.from(grouped.entries())
+      .map(([year, months]) => `${year}: ${months.join(", ")}`)
+      .join(" | ");
+  }, [selectedMonthsList]);
 
   const ActionIconButton = ({
     title,
@@ -732,20 +739,12 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
                 ? "nenhum processamento: falta catálogo, estado ou período"
                 : "somente catálogos, estados e períodos selecionados"}
             </p>
-            <p>
-              Catálogos selecionados: {selectedCatalogLabels.length > 0 ? selectedCatalogLabels.join(", ") : "nenhum"}
-            </p>
-            <p>
-              Estados selecionados: {selectedStateLabels.length > 0 ? selectedStateLabels.join(", ") : "nenhum"}
-            </p>
+            <p>Catálogos selecionados: {selectedCatalogCodes.length > 0 ? selectedCatalogCodes.join(", ") : "nenhum"}</p>
+            <p>Estados selecionados: {selectedStateCodes.length > 0 ? selectedStateCodes.join(", ") : "nenhum"}</p>
             <p>
               Anos selecionados: {selectedYearsList.length > 0 ? selectedYearsList.join(", ") : "nenhum"}
             </p>
-            <p>
-              Meses selecionados: {selectedMonthsList.length > 0
-                ? selectedMonthsList.map((m) => `${MONTHS[m.month - 1]} de ${m.year}`).join(", ")
-                : "nenhum"}
-            </p>
+            <p>Meses selecionados: {selectedMonthsByYearText}</p>
             <p className="text-xs text-[var(--muted)]">
               Enquanto faltar catálogo, estado ou período, nenhum download nem conversão é enfileirado.
             </p>
