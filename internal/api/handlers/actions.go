@@ -56,7 +56,7 @@ func (h *ActionsHandler) policyAllows(ctx context.Context, f *domain.File) (bool
 	if h.policy == nil {
 		return true, nil
 	}
-	return h.policy.PolicyAllows(ctx, f.Catalog, f.Year, f.Month)
+	return h.policy.PolicyAllows(ctx, f.Catalog, f.State, f.Year, f.Month)
 }
 
 func (h *ActionsHandler) stageEnabled(ctx context.Context, stage domain.StageName) (bool, error) {
@@ -737,10 +737,10 @@ type stageDisabledError struct {
 }
 
 func (policyDeniedError) Error() string {
-	return "processing policy does not allow this catalog and period"
+	return "processing policy does not allow this catalog, state and period"
 }
 func (policyIncompleteError) Error() string {
-	return "select at least one catalog and one period in processing policy"
+	return "select at least one catalog, one state and one period in processing policy"
 }
 func (downloadPausedError) Error() string {
 	return "downloads are paused by configuration"

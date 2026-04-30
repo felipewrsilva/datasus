@@ -11,12 +11,14 @@ func TestPolicySnapshot_Allows(t *testing.T) {
 		catalog  string
 		year     int
 		month    int
+		state    string
 		expected bool
 	}{
 		{
 			name:     "no selection denies all",
 			snap:     PolicySnapshot{},
 			catalog:  "RD",
+			state:    "SP",
 			year:     2024,
 			month:    1,
 			expected: false,
@@ -26,32 +28,47 @@ func TestPolicySnapshot_Allows(t *testing.T) {
 			snap: PolicySnapshot{
 				HasSelection: true,
 				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
 				years:        map[int]struct{}{2024: {}},
 				months:       map[int]map[int]struct{}{},
 			},
-			catalog: "SP", year: 2024, month: 1,
+			catalog: "SP", state: "SP", year: 2024, month: 1,
 			expected: false,
 		},
 		{
-			name: "year matches catalog",
+			name: "year matches catalog and state",
 			snap: PolicySnapshot{
 				HasSelection: true,
 				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
 				years:        map[int]struct{}{2024: {}},
 				months:       map[int]map[int]struct{}{},
 			},
-			catalog: "RD", year: 2024, month: 7,
+			catalog: "RD", state: "SP", year: 2024, month: 7,
 			expected: true,
 		},
 		{
-			name: "month matches catalog",
+			name: "state mismatch denies",
 			snap: PolicySnapshot{
 				HasSelection: true,
 				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
+				years:        map[int]struct{}{2024: {}},
+				months:       map[int]map[int]struct{}{},
+			},
+			catalog: "RD", state: "RJ", year: 2024, month: 7,
+			expected: false,
+		},
+		{
+			name: "month matches catalog and state",
+			snap: PolicySnapshot{
+				HasSelection: true,
+				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
 				years:        map[int]struct{}{},
 				months:       map[int]map[int]struct{}{2024: {3: {}}},
 			},
-			catalog: "RD", year: 2024, month: 3,
+			catalog: "RD", state: "SP", year: 2024, month: 3,
 			expected: true,
 		},
 		{
@@ -59,21 +76,23 @@ func TestPolicySnapshot_Allows(t *testing.T) {
 			snap: PolicySnapshot{
 				HasSelection: true,
 				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
 				years:        map[int]struct{}{},
 				months:       map[int]map[int]struct{}{2024: {3: {}}},
 			},
-			catalog: "RD", year: 2024, month: 4,
+			catalog: "RD", state: "SP", year: 2024, month: 4,
 			expected: false,
 		},
 		{
-			name: "lowercase catalog accepted via normalization",
+			name: "lowercase catalog and state accepted via normalization",
 			snap: PolicySnapshot{
 				HasSelection: true,
 				catalogs:     map[string]struct{}{"RD": {}},
+				states:       map[string]struct{}{"SP": {}},
 				years:        map[int]struct{}{2024: {}},
 				months:       map[int]map[int]struct{}{},
 			},
-			catalog: "rd", year: 2024, month: 1,
+			catalog: "rd", state: "sp", year: 2024, month: 1,
 			expected: true,
 		},
 	}
@@ -81,10 +100,10 @@ func TestPolicySnapshot_Allows(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := tc.snap.Allows(tc.catalog, tc.year, tc.month)
+			got := tc.snap.Allows(tc.catalog, tc.state, tc.year, tc.month)
 			if got != tc.expected {
-				t.Fatalf("Allows(%q, %d, %d) = %v, want %v",
-					tc.catalog, tc.year, tc.month, got, tc.expected)
+				t.Fatalf("Allows(%q, %q, %d, %d) = %v, want %v",
+					tc.catalog, tc.state, tc.year, tc.month, got, tc.expected)
 			}
 		})
 	}

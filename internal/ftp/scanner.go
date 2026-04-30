@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"datasus/internal/domain"
+	"datasus/internal/observability"
 	"datasus/internal/queue"
 	"datasus/internal/repository"
 )
@@ -176,7 +177,7 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 
 	allowByPolicy := true
 	if s.policy != nil {
-		allowByPolicy, err = s.policy.PolicyAllows(ctx, file.Catalog, file.Year, file.Month)
+		allowByPolicy, err = s.policy.PolicyAllows(ctx, file.Catalog, file.State, file.Year, file.Month)
 		if err != nil {
 			return fmt.Errorf("check policy: %w", err)
 		}
@@ -185,6 +186,7 @@ func (s *Scanner) processEntry(ctx context.Context, dir string, e Entry, result 
 	stage, shouldEnqueue := nextStageFor(file.OverallStatus, changed)
 	if !allowByPolicy {
 		result.SkippedByPolicy++
+		observability.PolicySkipsByState.WithLabelValues(parsed.State, "scanner_legacy").Inc()
 		if shouldMoveToIgnored(file.OverallStatus) {
 			if err := s.fileRepo.UpdateStatus(ctx, file.ID, domain.StatusIgnored); err != nil {
 				return fmt.Errorf("set ignored by policy: %w", err)

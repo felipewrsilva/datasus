@@ -20,6 +20,12 @@ var knownPolicyCatalogs = []string{
 	"AD", "RD", "SP", "AQ", "AM", "BI", "RJ", "PA", "AR", "ER", "PS", "AN",
 }
 
+var knownPolicyStates = []string{
+	"AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+	"MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+	"RS", "RO", "RR", "SC", "SP", "SE", "TO",
+}
+
 func NewPolicyRepository(db *pgxpool.Pool) *PolicyRepository {
 	return &PolicyRepository{db: db}
 }
@@ -44,6 +50,17 @@ func (r *PolicyRepository) ensureGlobalPolicyTables(ctx context.Context) error {
 			PRIMARY KEY (year, month)
 		)`); err != nil {
 		return fmt.Errorf("ensure download_policy_months: %w", err)
+	}
+	if _, err := r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS download_policy_states (
+			state CHAR(2) PRIMARY KEY,
+			CONSTRAINT download_policy_states_valid_chk CHECK (state IN (
+				'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA',
+				'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN',
+				'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+			))
+		)`); err != nil {
+		return fmt.Errorf("ensure download_policy_states: %w", err)
 	}
 	if _, err := r.db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS processing_policy_config (
@@ -107,8 +124,10 @@ type ProcessingDirectories struct {
 // GlobalPolicy is the API shape for processing policy configuration.
 type GlobalPolicy struct {
 	AvailableCatalogs []string              `json:"available_catalogs"`
+	AvailableStates   []string              `json:"available_states"`
 	AvailablePeriods  AvailablePeriods      `json:"available_periods"`
 	SelectedCatalogs  []string              `json:"selected_catalogs"`
+	SelectedStates    []string              `json:"selected_states"`
 	SelectedPeriods   PolicyPeriods         `json:"selected_periods"`
 	Processing        ProcessingStages      `json:"processing"`
 	Directories       ProcessingDirectories `json:"directories"`
@@ -116,6 +135,10 @@ type GlobalPolicy struct {
 
 func normalizeCatalog(c string) string {
 	return strings.ToUpper(strings.TrimSpace(c))
+}
+
+func normalizeState(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
 }
 
 func (r *PolicyRepository) listAvailableCatalogs(ctx context.Context) ([]string, error) {
@@ -157,12 +180,55 @@ func (r *PolicyRepository) listAvailableCatalogs(ctx context.Context) ([]string,
 	return catalogs, nil
 }
 
+func (r *PolicyRepository) listAvailableStates(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT s FROM (
+			SELECT DISTINCT UPPER(TRIM(f.state::text))::text AS s FROM files f
+			UNION
+			SELECT UPPER(TRIM(s.state::text))::text FROM download_policy_states s
+		) t
+		WHERE s IS NOT NULL AND btrim(s) != ''
+		ORDER BY 1`)
+	if err != nil {
+		return nil, fmt.Errorf("list available states: %w", err)
+	}
+	var states []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		states = append(states, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(states))
+	for _, s := range states {
+		seen[s] = struct{}{}
+	}
+	for _, known := range knownPolicyStates {
+		if _, ok := seen[known]; ok {
+			continue
+		}
+		states = append(states, known)
+	}
+	slices.Sort(states)
+	return states, nil
+}
+
 // GetPolicies returns the global policy and available catalogs for selection.
 func (r *PolicyRepository) GetPolicies(ctx context.Context) (GlobalPolicy, error) {
 	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
 		return GlobalPolicy{}, err
 	}
 	availableCatalogs, err := r.listAvailableCatalogs(ctx)
+	if err != nil {
+		return GlobalPolicy{}, err
+	}
+	availableStates, err := r.listAvailableStates(ctx)
 	if err != nil {
 		return GlobalPolicy{}, err
 	}
@@ -187,6 +253,24 @@ func (r *PolicyRepository) GetPolicies(ctx context.Context) (GlobalPolicy, error
 	}
 	selectedCatalogRows.Close()
 	if err := selectedCatalogRows.Err(); err != nil {
+		return GlobalPolicy{}, err
+	}
+	selectedStateRows, err := r.db.Query(ctx, `
+		SELECT state::text FROM download_policy_states ORDER BY state`)
+	if err != nil {
+		return GlobalPolicy{}, fmt.Errorf("list selected states: %w", err)
+	}
+	selectedStates := make([]string, 0)
+	for selectedStateRows.Next() {
+		var state string
+		if err := selectedStateRows.Scan(&state); err != nil {
+			selectedStateRows.Close()
+			return GlobalPolicy{}, err
+		}
+		selectedStates = append(selectedStates, normalizeState(state))
+	}
+	selectedStateRows.Close()
+	if err := selectedStateRows.Err(); err != nil {
 		return GlobalPolicy{}, err
 	}
 
@@ -246,8 +330,10 @@ func (r *PolicyRepository) GetPolicies(ctx context.Context) (GlobalPolicy, error
 
 	return GlobalPolicy{
 		AvailableCatalogs: availableCatalogs,
+		AvailableStates:   availableStates,
 		AvailablePeriods:  availablePeriods,
 		SelectedCatalogs:  selectedCatalogs,
+		SelectedStates:    selectedStates,
 		SelectedPeriods: PolicyPeriods{
 			Years:  selectedYears,
 			Months: selectedMonths,
@@ -284,7 +370,7 @@ func validateProcessingStages(stages ProcessingStages) error {
 	return nil
 }
 
-// ReplacePolicies overwrites global selected catalogs and periods in one transaction.
+// ReplacePolicies overwrites global selected catalogs, states and periods in one transaction.
 func (r *PolicyRepository) ReplacePolicies(ctx context.Context, in GlobalPolicy) error {
 	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
 		return err
@@ -335,6 +421,9 @@ func (r *PolicyRepository) ReplacePolicies(ctx context.Context, in GlobalPolicy)
 	if _, err := tx.Exec(ctx, `DELETE FROM download_policy_catalogs`); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM download_policy_states`); err != nil {
+		return err
+	}
 
 	seenCatalogs := map[string]struct{}{}
 	for _, rawCatalog := range in.SelectedCatalogs {
@@ -349,6 +438,30 @@ func (r *PolicyRepository) ReplacePolicies(ctx context.Context, in GlobalPolicy)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO download_policy_catalogs (catalog) VALUES ($1::char(2))`,
 			catalog,
+		); err != nil {
+			return err
+		}
+	}
+	knownStateSet := make(map[string]struct{}, len(knownPolicyStates))
+	for _, state := range knownPolicyStates {
+		knownStateSet[state] = struct{}{}
+	}
+	seenStates := map[string]struct{}{}
+	for _, rawState := range in.SelectedStates {
+		state := normalizeState(rawState)
+		if len(state) != 2 {
+			return fmt.Errorf("invalid state: %q", rawState)
+		}
+		if _, ok := knownStateSet[state]; !ok {
+			return fmt.Errorf("invalid state: %q", rawState)
+		}
+		if _, exists := seenStates[state]; exists {
+			continue
+		}
+		seenStates[state] = struct{}{}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO download_policy_states (state) VALUES ($1::char(2))`,
+			state,
 		); err != nil {
 			return err
 		}
@@ -453,36 +566,37 @@ func (r *PolicyRepository) ProcessingDirectories(ctx context.Context) (Processin
 }
 
 // policySelectionSummary returns how many catalogs and period rows are selected in the global policy.
-func (r *PolicyRepository) policySelectionSummary(ctx context.Context) (catalogCount int, periodCount int, err error) {
+func (r *PolicyRepository) policySelectionSummary(ctx context.Context) (catalogCount int, stateCount int, periodCount int, err error) {
 	if err := r.ensureGlobalPolicyTables(ctx); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	err = r.db.QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(1) FROM download_policy_catalogs),
+			(SELECT COUNT(1) FROM download_policy_states),
 			(SELECT (SELECT COUNT(1) FROM download_policy_years) + (SELECT COUNT(1) FROM download_policy_months))`,
-	).Scan(&catalogCount, &periodCount)
+	).Scan(&catalogCount, &stateCount, &periodCount)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return catalogCount, periodCount, nil
+	return catalogCount, stateCount, periodCount, nil
 }
 
-// PolicySelectionComplete is true when at least one catalog and at least one period (year and/or month row) are configured.
+// PolicySelectionComplete is true when at least one catalog, one state and one period are configured.
 func (r *PolicyRepository) PolicySelectionComplete(ctx context.Context) (bool, error) {
-	c, p, err := r.policySelectionSummary(ctx)
+	c, s, p, err := r.policySelectionSummary(ctx)
 	if err != nil {
 		return false, err
 	}
-	return c > 0 && p > 0, nil
+	return c > 0 && s > 0 && p > 0, nil
 }
 
-func (r *PolicyRepository) PolicyAllows(ctx context.Context, catalog string, year, month int) (bool, error) {
-	selectedCatalogCount, selectedPeriodCount, err := r.policySelectionSummary(ctx)
+func (r *PolicyRepository) PolicyAllows(ctx context.Context, catalog, state string, year, month int) (bool, error) {
+	selectedCatalogCount, selectedStateCount, selectedPeriodCount, err := r.policySelectionSummary(ctx)
 	if err != nil {
 		return false, err
 	}
-	if selectedCatalogCount == 0 || selectedPeriodCount == 0 {
+	if selectedCatalogCount == 0 || selectedStateCount == 0 || selectedPeriodCount == 0 {
 		return false, nil
 	}
 
@@ -494,6 +608,16 @@ func (r *PolicyRepository) PolicyAllows(ctx context.Context, catalog string, yea
 		return false, err
 	}
 	if !catalogSelected {
+		return false, nil
+	}
+	st := normalizeState(state)
+	var stateSelected bool
+	if err := r.db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM download_policy_states WHERE state = $1::char(2))`, st,
+	).Scan(&stateSelected); err != nil {
+		return false, err
+	}
+	if !stateSelected {
 		return false, nil
 	}
 
@@ -521,6 +645,7 @@ func (r *PolicyRepository) PolicyAllows(ctx context.Context, catalog string, yea
 type PolicySnapshot struct {
 	HasSelection bool
 	catalogs     map[string]struct{}
+	states       map[string]struct{}
 	years        map[int]struct{}
 	months       map[int]map[int]struct{}
 }
@@ -528,12 +653,16 @@ type PolicySnapshot struct {
 // Allows reports whether (catalog, year, month) is selected by the snapshot.
 // Mirrors PolicyAllows: empty selection denies all; year selected covers all
 // months of that year; otherwise the (year, month) pair must be selected.
-func (s PolicySnapshot) Allows(catalog string, year, month int) bool {
+func (s PolicySnapshot) Allows(catalog, state string, year, month int) bool {
 	if !s.HasSelection {
 		return false
 	}
 	cat := normalizeCatalog(catalog)
 	if _, ok := s.catalogs[cat]; !ok {
+		return false
+	}
+	st := normalizeState(state)
+	if _, ok := s.states[st]; !ok {
 		return false
 	}
 	if _, ok := s.years[year]; ok {
@@ -554,6 +683,7 @@ func (r *PolicyRepository) LoadPolicySnapshot(ctx context.Context) (PolicySnapsh
 	}
 	snap := PolicySnapshot{
 		catalogs: map[string]struct{}{},
+		states:   map[string]struct{}{},
 		years:    map[int]struct{}{},
 		months:   map[int]map[int]struct{}{},
 	}
@@ -572,6 +702,22 @@ func (r *PolicyRepository) LoadPolicySnapshot(ctx context.Context) (PolicySnapsh
 	}
 	catRows.Close()
 	if err := catRows.Err(); err != nil {
+		return PolicySnapshot{}, err
+	}
+	stateRows, err := r.db.Query(ctx, `SELECT state::text FROM download_policy_states`)
+	if err != nil {
+		return PolicySnapshot{}, fmt.Errorf("load policy states: %w", err)
+	}
+	for stateRows.Next() {
+		var s string
+		if err := stateRows.Scan(&s); err != nil {
+			stateRows.Close()
+			return PolicySnapshot{}, err
+		}
+		snap.states[normalizeState(s)] = struct{}{}
+	}
+	stateRows.Close()
+	if err := stateRows.Err(); err != nil {
 		return PolicySnapshot{}, err
 	}
 
@@ -615,7 +761,7 @@ func (r *PolicyRepository) LoadPolicySnapshot(ctx context.Context) (PolicySnapsh
 	}
 
 	hasPeriod := len(snap.years) > 0 || len(snap.months) > 0
-	snap.HasSelection = len(snap.catalogs) > 0 && hasPeriod
+	snap.HasSelection = len(snap.catalogs) > 0 && len(snap.states) > 0 && hasPeriod
 	return snap, nil
 }
 
@@ -653,6 +799,11 @@ func (r *PolicyRepository) ReconcileIgnoredStatuses(ctx context.Context) (int64,
 			SELECT 1
 			FROM download_policy_catalogs c
 			WHERE c.catalog = UPPER(TRIM(files.catalog::text))::char(2)
+		)
+		AND EXISTS(
+			SELECT 1
+			FROM download_policy_states s
+			WHERE s.state = UPPER(TRIM(files.state::text))::char(2)
 		)
 		AND (
 			EXISTS(SELECT 1 FROM download_policy_years y WHERE y.year = files.year)
@@ -707,6 +858,11 @@ func (r *PolicyRepository) EnqueuePendingDownloadsByPolicy(ctx context.Context) 
 			SELECT 1
 			FROM download_policy_catalogs c
 			WHERE c.catalog = UPPER(TRIM(files.catalog::text))::char(2)
+		)
+		AND EXISTS(
+			SELECT 1
+			FROM download_policy_states s
+			WHERE s.state = UPPER(TRIM(files.state::text))::char(2)
 		)
 		AND (
 			EXISTS(SELECT 1 FROM download_policy_years y WHERE y.year = files.year)

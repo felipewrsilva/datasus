@@ -130,7 +130,7 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 		if s.policy == nil {
 			c.allowByPolicy = true
 		} else {
-			c.allowByPolicy = polSnap.Allows(ve.parsed.Catalog, ve.parsed.Year, ve.parsed.Month)
+			c.allowByPolicy = polSnap.Allows(ve.parsed.Catalog, ve.parsed.State, ve.parsed.Year, ve.parsed.Month)
 		}
 		if c.k != kindUnchanged {
 			upserts = append(upserts, buildUpsertParams(ve.entry, ve.parsed, dir, rootPath))
@@ -191,6 +191,7 @@ func (s *Scanner) processEntriesBatch(ctx context.Context, dir string, entries [
 		switch {
 		case !c.allowByPolicy:
 			result.SkippedByPolicy++
+			observability.PolicySkipsByState.WithLabelValues(c.parsed.State, "scanner_batch").Inc()
 			if shouldMoveToIgnored(c.prevStatus) {
 				ignoreIDs = append(ignoreIDs, id)
 			}

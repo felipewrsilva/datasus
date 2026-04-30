@@ -55,7 +55,7 @@ func (s *Service) Process(ctx context.Context, job *queue.Job) error {
 		return fmt.Errorf("get file: %w", err)
 	}
 	if s.policy != nil {
-		allow, err := s.policy.PolicyAllows(ctx, file.Catalog, file.Year, file.Month)
+		allow, err := s.policy.PolicyAllows(ctx, file.Catalog, file.State, file.Year, file.Month)
 		if err != nil {
 			return err
 		}

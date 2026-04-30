@@ -64,6 +64,11 @@ var (
 		Help: "Total database round trips performed by FTP scans (snapshot, bulk upsert, batch enqueue, etc.).",
 	})
 
+	PolicySkipsByState = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "datasus_policy_skips_by_state_total",
+		Help: "Total files skipped by policy, grouped by state and source.",
+	}, []string{"state", "source"})
+
 	PolicySyncRunsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "datasus_policy_sync_runs_total",
 		Help: "Total policy-driven local filesystem synchronization runs.",

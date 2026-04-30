@@ -1,4 +1,4 @@
-const UF_TO_PTBR: Record<string, string> = {
+export const UF_TO_PTBR: Record<string, string> = {
   AC: "Acre",
   AL: "Alagoas",
   AP: "Amapa",
@@ -27,6 +27,10 @@ const UF_TO_PTBR: Record<string, string> = {
   SE: "Sergipe",
   TO: "Tocantins",
 };
+
+export const POLICY_STATES = Object.entries(UF_TO_PTBR)
+  .map(([uf, name]) => ({ uf, name, label: `${uf} - ${name}` }))
+  .sort((a, b) => a.uf.localeCompare(b.uf));
 
 export function stateNamePtBR(uf: string | null | undefined): string {
   const key = (uf ?? "").trim().toUpperCase();

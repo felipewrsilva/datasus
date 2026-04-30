@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getPolicies, putPolicies } from "@/lib/api";
 import type { YearMonth } from "@/lib/types";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
+import { POLICY_STATES } from "@/lib/stateLabels";
 import { Button } from "@/components/ui/button";
 
 const MONTHS = [
@@ -71,10 +72,13 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
   const [availablePeriodYears, setAvailablePeriodYears] = useState<number[]>([]);
   const [availablePeriodMonths, setAvailablePeriodMonths] = useState<YearMonth[]>([]);
   const [availableCatalogs, setAvailableCatalogs] = useState<string[]>([]);
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
   const [selectedCatalogs, setSelectedCatalogs] = useState<Set<string>>(new Set());
+  const [selectedStates, setSelectedStates] = useState<Set<string>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number>>(new Set());
   const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [stateQuery, setStateQuery] = useState("");
   const [expandedYears, setExpandedYears] = useState<Record<number, boolean>>({});
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +103,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
     const buildSnapshot = (policy: Parameters<typeof putPolicies>[0]) => JSON.stringify(policy);
     const buildPayloadFromState = (p: Awaited<ReturnType<typeof getPolicies>>): Parameters<typeof putPolicies>[0] => ({
       selected_catalogs: [...(p.selected_catalogs ?? [])].map((c) => c.toUpperCase()).sort(),
+      selected_states: [...(p.selected_states ?? [])].map((s) => s.toUpperCase()).sort(),
       selected_periods: {
         years: [...(p.selected_periods?.years ?? [])].map((y) => Number(y)).filter((y) => Number.isFinite(y)).sort((a, b) => a - b),
         months: [...(p.selected_periods?.months ?? [])]
@@ -128,7 +133,9 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
           );
         setAvailablePeriodMonths(payloadAvailableMonths);
         setAvailableCatalogs((p.available_catalogs ?? []).map((c) => c.toUpperCase()));
+        setAvailableStates((p.available_states ?? []).map((s) => s.toUpperCase()));
         setSelectedCatalogs(new Set((p.selected_catalogs ?? []).map((c) => c.toUpperCase())));
+        setSelectedStates(new Set((p.selected_states ?? []).map((s) => s.toUpperCase())));
         setSelectedYears(
           new Set((p.selected_periods?.years ?? []).map((y) => Number(y)).filter((y) => Number.isFinite(y))),
         );
@@ -163,6 +170,15 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
       const next = new Set(prev);
       if (checked) next.add(catalog);
       else next.delete(catalog);
+      return next;
+    });
+  };
+
+  const toggleState = (state: string, checked: boolean) => {
+    setSelectedStates((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(state);
+      else next.delete(state);
       return next;
     });
   };
@@ -260,6 +276,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
     setLoadErr(null);
     try {
       const selectedCatalogsList = Array.from(selectedCatalogs).sort();
+      const selectedStatesList = Array.from(selectedStates).sort();
       const selectedYearsList = Array.from(selectedYears).sort((a, b) => a - b);
       const selectedMonthsList: YearMonth[] = Array.from(selectedMonths)
         .map((key) => {
@@ -269,6 +286,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
       const updated = await putPolicies({
         selected_catalogs: selectedCatalogsList,
+        selected_states: selectedStatesList,
         selected_periods: {
           years: selectedYearsList,
           months: selectedMonthsList,
@@ -290,7 +308,9 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
       setAvailablePeriodYears((updated.available_periods?.years ?? []).map((y) => Number(y)).filter((y) => Number.isFinite(y)));
       setAvailablePeriodMonths(updatedAvailableMonths);
       setAvailableCatalogs((updated.available_catalogs ?? []).map((c) => c.toUpperCase()));
+      setAvailableStates((updated.available_states ?? []).map((s) => s.toUpperCase()));
       setSelectedCatalogs(new Set((updated.selected_catalogs ?? []).map((c) => c.toUpperCase())));
+      setSelectedStates(new Set((updated.selected_states ?? []).map((s) => s.toUpperCase())));
       setSelectedYears(
         new Set((updated.selected_periods?.years ?? []).map((y) => Number(y)).filter((y) => Number.isFinite(y))),
       );
@@ -310,6 +330,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
       setSavedSnapshot(
         JSON.stringify({
           selected_catalogs: (updated.selected_catalogs ?? []).map((c) => c.toUpperCase()).sort(),
+          selected_states: (updated.selected_states ?? []).map((s) => s.toUpperCase()).sort(),
           selected_periods: {
             years: (updated.selected_periods?.years ?? []).map((y) => Number(y)).sort((a, b) => a - b),
             months: (updated.selected_periods?.months ?? [])
@@ -340,9 +361,17 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
     formatCatalogLabel(catalog).toLowerCase().includes(query.trim().toLowerCase()) ||
     catalog.toLowerCase().includes(query.trim().toLowerCase()),
   );
+  const allowedStates = new Set(availableStates.length > 0 ? availableStates : POLICY_STATES.map((item) => item.uf));
+  const filteredStates = POLICY_STATES.filter((item) => {
+    if (!allowedStates.has(item.uf)) return false;
+    const term = stateQuery.trim().toLowerCase();
+    if (!term) return true;
+    return item.uf.toLowerCase().includes(term) || item.name.toLowerCase().includes(term);
+  });
   const hasSelectedPeriod = selectedYears.size > 0 || selectedMonths.size > 0;
   const currentPayloadSnapshot = JSON.stringify({
     selected_catalogs: Array.from(selectedCatalogs).sort(),
+    selected_states: Array.from(selectedStates).sort(),
     selected_periods: {
       years: Array.from(selectedYears).sort((a, b) => a - b),
       months: Array.from(selectedMonths)
@@ -370,6 +399,9 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
   const selectedCatalogLabels = Array.from(selectedCatalogs)
     .sort()
     .map((catalog) => formatCatalogLabel(catalog));
+  const selectedStateLabels = Array.from(selectedStates)
+    .sort()
+    .map((state) => POLICY_STATES.find((item) => item.uf === state)?.label ?? state);
   const selectedYearsList = Array.from(selectedYears).sort((a, b) => a - b);
   const selectedMonthsList = Array.from(selectedMonths)
     .map((key) => {
@@ -384,7 +416,7 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         <div>
           <h2 className="text-lg font-semibold text-[var(--foreground)]">Configuração da política</h2>
           <p className="text-sm text-[var(--muted)] mt-1 max-w-3xl">
-            Defina quais etapas do processamento ficam ativas e o escopo por catálogo e período.
+            Defina quais etapas do processamento ficam ativas e o escopo por catálogo, estado e período.
           </p>
         </div>
         <Button
@@ -537,7 +569,50 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         </section>
 
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
-          <h3 className="text-base font-semibold text-[var(--foreground)]">4. Período</h3>
+          <h3 className="text-base font-semibold text-[var(--foreground)]">4. Estados</h3>
+          <p className="mt-1 text-xs text-[var(--muted)]">Selecione os estados permitidos. Sem seleção, nada é processado.</p>
+          <div className="mt-3 mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="secondary-link-chip text-xs"
+              onClick={() => setSelectedStates(new Set(POLICY_STATES.map((state) => state.uf)))}
+            >
+              Selecionar todos
+            </button>
+            <button
+              type="button"
+              className="secondary-link-chip text-xs"
+              onClick={() => setSelectedStates(new Set())}
+            >
+              Limpar
+            </button>
+          </div>
+          <input
+            type="search"
+            value={stateQuery}
+            onChange={(e) => setStateQuery(e.target.value)}
+            placeholder="Filtrar por UF ou nome"
+            className="form-control mt-3 mb-3 w-full rounded-xl px-3 py-2 text-sm"
+          />
+          <div className="max-h-[22rem] space-y-2 overflow-auto pr-1">
+            {filteredStates.map((state) => (
+              <label
+                key={state.uf}
+                className="flex cursor-pointer items-center justify-between rounded-xl border border-[var(--border)]/70 bg-[var(--background)]/20 px-3 py-2 text-sm"
+              >
+                <span className="text-[var(--foreground)]">{state.label}</span>
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={selectedStates.has(state.uf)}
+                  onChange={(e) => toggleState(state.uf, e.target.checked)}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
+          <h3 className="text-base font-semibold text-[var(--foreground)]">5. Período</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">
             Marque o ano para incluir os 12 meses calendário ou escolha meses avulsos. Meses ainda sem arquivo na base
             podem ser marcados para liberar o processamento quando o dado aparecer.
@@ -611,38 +686,40 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
             })}
           </div>
         </section>
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
+          <h3 className="text-base font-semibold text-[var(--foreground)]">6. Resumo</h3>
+          <div className="mt-2 space-y-2 text-sm text-[var(--muted)]">
+            <p>
+              Etapas ativas: {enableDownload ? "download" : "download desativado"}
+              {enableCSV ? ", csv" : ""}
+              {enableParquet ? ", parquet" : ""}
+            </p>
+            <p>
+              Modo atual:{" "}
+              {selectedCatalogs.size === 0 || selectedStates.size === 0 || !hasSelectedPeriod
+                ? "nenhum processamento: falta catálogo, estado ou período"
+                : "somente catálogos, estados e períodos selecionados"}
+            </p>
+            <p>
+              Catálogos selecionados: {selectedCatalogLabels.length > 0 ? selectedCatalogLabels.join(", ") : "nenhum"}
+            </p>
+            <p>
+              Estados selecionados: {selectedStateLabels.length > 0 ? selectedStateLabels.join(", ") : "nenhum"}
+            </p>
+            <p>
+              Anos selecionados: {selectedYearsList.length > 0 ? selectedYearsList.join(", ") : "nenhum"}
+            </p>
+            <p>
+              Meses selecionados: {selectedMonthsList.length > 0
+                ? selectedMonthsList.map((m) => `${MONTHS[m.month - 1]} de ${m.year}`).join(", ")
+                : "nenhum"}
+            </p>
+            <p className="text-xs text-[var(--muted)]">
+              Enquanto faltar catálogo, estado ou período, nenhum download nem conversão é enfileirado.
+            </p>
+          </div>
+        </section>
       </div>
-
-      <section className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
-        <h3 className="text-base font-semibold text-[var(--foreground)]">4. Resumo</h3>
-        <div className="mt-2 space-y-2 text-sm text-[var(--muted)]">
-          <p>
-            Etapas ativas: {enableDownload ? "download" : "download desativado"}
-            {enableCSV ? ", csv" : ""}
-            {enableParquet ? ", parquet" : ""}
-          </p>
-          <p>
-            Modo atual:{" "}
-            {selectedCatalogs.size === 0 || !hasSelectedPeriod
-              ? "nenhum processamento: falta catálogo ou período"
-              : "somente catálogos e períodos selecionados"}
-          </p>
-          <p>
-            Catálogos selecionados: {selectedCatalogLabels.length > 0 ? selectedCatalogLabels.join(", ") : "nenhum"}
-          </p>
-          <p>
-            Anos selecionados: {selectedYearsList.length > 0 ? selectedYearsList.join(", ") : "nenhum"}
-          </p>
-          <p>
-            Meses selecionados: {selectedMonthsList.length > 0
-              ? selectedMonthsList.map((m) => `${MONTHS[m.month - 1]} de ${m.year}`).join(", ")
-              : "nenhum"}
-          </p>
-          <p className="text-xs text-[var(--muted)]">
-            Enquanto faltar catálogo ou período, nenhum download nem conversão é enfileirado.
-          </p>
-        </div>
-      </section>
     </section>
   );
 }

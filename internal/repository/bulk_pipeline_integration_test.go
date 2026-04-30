@@ -155,11 +155,13 @@ func TestLoadPolicySnapshot(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 		_, _ = pool.Exec(ctx, `DELETE FROM files WHERE catalog = 'PO'`)
 	})
 	_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 	_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+	_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 	_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	_, _ = pool.Exec(ctx, `DELETE FROM files WHERE catalog = 'PO'`)
 
@@ -175,6 +177,7 @@ func TestLoadPolicySnapshot(t *testing.T) {
 
 	in := GlobalPolicy{
 		SelectedCatalogs: []string{"PO"},
+		SelectedStates:   []string{"SP"},
 		SelectedPeriods: PolicyPeriods{
 			Months: []YearMonth{{Year: 2024, Month: 3}},
 		},
@@ -195,13 +198,13 @@ func TestLoadPolicySnapshot(t *testing.T) {
 	if !snap.HasSelection {
 		t.Fatalf("expected HasSelection = true")
 	}
-	if !snap.Allows("PO", 2024, 3) {
-		t.Fatal("expected snap.Allows(PO, 2024, 3) = true")
+	if !snap.Allows("PO", "SP", 2024, 3) {
+		t.Fatal("expected snap.Allows(PO, SP, 2024, 3) = true")
 	}
-	if snap.Allows("PO", 2024, 4) {
-		t.Fatal("expected snap.Allows(PO, 2024, 4) = false")
+	if snap.Allows("PO", "SP", 2024, 4) {
+		t.Fatal("expected snap.Allows(PO, SP, 2024, 4) = false")
 	}
-	if snap.Allows("XX", 2024, 3) {
+	if snap.Allows("XX", "SP", 2024, 3) {
 		t.Fatal("catalog mismatch should deny")
 	}
 }

@@ -42,11 +42,13 @@ func TestPolicyReconcileIgnoredStatusesAndParity(t *testing.T) {
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	})
 
 	err := policyRepo.ReplacePolicies(ctx, GlobalPolicy{
 		SelectedCatalogs: []string{"SP"},
+		SelectedStates:   []string{"AC"},
 		SelectedPeriods: PolicyPeriods{
 			Years: []int{2024},
 		},
@@ -78,6 +80,7 @@ func TestPolicyReconcileIgnoredStatusesAndParity(t *testing.T) {
 
 	err = policyRepo.ReplacePolicies(ctx, GlobalPolicy{
 		SelectedCatalogs: []string{"SP", "RJ"},
+		SelectedStates:   []string{"AC"},
 		SelectedPeriods: PolicyPeriods{
 			Years: []int{2023, 2024},
 		},
@@ -113,6 +116,7 @@ func TestPolicyReconcileIgnoredStatusesAndParity(t *testing.T) {
 	// Reapplying the same policy must keep queue idempotent.
 	err = policyRepo.ReplacePolicies(ctx, GlobalPolicy{
 		SelectedCatalogs: []string{"SP", "RJ"},
+		SelectedStates:   []string{"AC"},
 		SelectedPeriods: PolicyPeriods{
 			Years: []int{2023, 2024},
 		},
@@ -166,6 +170,7 @@ func TestPolicyReconcileEmptySelectionMarksPendingAsIgnored(t *testing.T) {
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	})
 
@@ -174,6 +179,9 @@ func TestPolicyReconcileEmptySelectionMarksPendingAsIgnored(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM download_policy_years`); err != nil {
 		t.Fatalf("clear policy years: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM download_policy_states`); err != nil {
+		t.Fatalf("clear policy states: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM download_policy_catalogs`); err != nil {
 		t.Fatalf("clear policy catalogs: %v", err)

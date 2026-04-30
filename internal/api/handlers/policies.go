@@ -33,6 +33,7 @@ func (h *PoliciesHandler) Get(w http.ResponseWriter, r *http.Request) {
 // putBody is the shape for PUT /api/policies.
 type putBody struct {
 	SelectedCatalogs []string                         `json:"selected_catalogs"`
+	SelectedStates   []string                         `json:"selected_states"`
 	SelectedPeriods  repository.PolicyPeriods         `json:"selected_periods"`
 	Processing       repository.ProcessingStages      `json:"processing"`
 	Directories      repository.ProcessingDirectories `json:"directories"`
@@ -46,6 +47,7 @@ func (h *PoliciesHandler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.repo.ReplacePolicies(r.Context(), repository.GlobalPolicy{
 		SelectedCatalogs: body.SelectedCatalogs,
+		SelectedStates:   body.SelectedStates,
 		SelectedPeriods:  body.SelectedPeriods,
 		Processing:       body.Processing,
 		Directories:      body.Directories,

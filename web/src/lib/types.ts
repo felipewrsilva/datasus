@@ -178,11 +178,13 @@ export interface YearMonth {
 
 export interface PoliciesResponse {
   available_catalogs: string[];
+  available_states: string[];
   available_periods: {
     years: number[];
     months: YearMonth[];
   };
   selected_catalogs: string[];
+  selected_states: string[];
   selected_periods: {
     years: number[];
     months: YearMonth[];

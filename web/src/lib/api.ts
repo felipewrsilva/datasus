@@ -301,6 +301,7 @@ function normalizePolicies(raw: unknown): PoliciesResponse {
   const selectedMonthsRaw = pick<unknown[]>(selectedPeriodsRaw, "months", "Months") ?? [];
   return {
     available_catalogs: (pick<unknown[]>(r, "available_catalogs", "AvailableCatalogs") ?? []).map((x) => String(x)),
+    available_states: (pick<unknown[]>(r, "available_states", "AvailableStates") ?? []).map((x) => String(x)),
     available_periods: {
       years: availableYearsRaw.map((x) => Number(x)).filter((x) => Number.isFinite(x)),
       months: availableMonthsRaw.map((item) => {
@@ -312,6 +313,7 @@ function normalizePolicies(raw: unknown): PoliciesResponse {
       }).filter((item) => Number.isFinite(item.year) && Number.isFinite(item.month) && item.month >= 1 && item.month <= 12),
     },
     selected_catalogs: (pick<unknown[]>(r, "selected_catalogs", "SelectedCatalogs") ?? []).map((x) => String(x)),
+    selected_states: (pick<unknown[]>(r, "selected_states", "SelectedStates") ?? []).map((x) => String(x)),
     selected_periods: {
       years: selectedYearsRaw.map((x) => Number(x)).filter((x) => Number.isFinite(x)),
       months: selectedMonthsRaw.map((item) => {
@@ -382,6 +384,7 @@ export async function getPolicies(): Promise<PoliciesResponse> {
 
 export async function putPolicies(input: {
   selected_catalogs: string[];
+  selected_states: string[];
   selected_periods: { years: number[]; months: Array<{ year: number; month: number }> };
   processing: { enable_download: boolean; enable_csv: boolean; enable_parquet: boolean };
   directories?: { download_dir?: string; csv_dir?: string; parquet_dir?: string };

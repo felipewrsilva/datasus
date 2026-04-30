@@ -19,6 +19,7 @@ func TestReplacePolicies_acceptsMonthNotPresentInFiles(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM files WHERE filename = $1`, fn)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	})
 
@@ -33,6 +34,7 @@ func TestReplacePolicies_acceptsMonthNotPresentInFiles(t *testing.T) {
 
 	in := GlobalPolicy{
 		SelectedCatalogs: []string{"SP"},
+		SelectedStates:   []string{"AC"},
 		SelectedPeriods: PolicyPeriods{
 			Years:  nil,
 			Months: []YearMonth{{Year: 2024, Month: 6}},
@@ -55,11 +57,11 @@ func TestReplacePolicies_acceptsMonthNotPresentInFiles(t *testing.T) {
 		t.Fatalf("GetPolicies months = %+v, want one 2024-06", got.SelectedPeriods.Months)
 	}
 
-	allow, err := repo.PolicyAllows(ctx, "SP", 2024, 6)
+	allow, err := repo.PolicyAllows(ctx, "SP", "AC", 2024, 6)
 	if err != nil || !allow {
 		t.Fatalf("PolicyAllows SP 2024-6 = %v, %v", allow, err)
 	}
-	allow, err = repo.PolicyAllows(ctx, "SP", 2024, 3)
+	allow, err = repo.PolicyAllows(ctx, "SP", "AC", 2024, 3)
 	if err != nil || allow {
 		t.Fatalf("PolicyAllows SP 2024-3 = %v, %v (should be false)", allow, err)
 	}
@@ -75,6 +77,7 @@ func TestReplacePolicies_rejectsYearNotInAvailablePeriods(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM files WHERE filename = $1`, fn)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	})
 
@@ -89,6 +92,7 @@ func TestReplacePolicies_rejectsYearNotInAvailablePeriods(t *testing.T) {
 
 	in := GlobalPolicy{
 		SelectedCatalogs: []string{"SP"},
+		SelectedStates:   []string{"AC"},
 		SelectedPeriods: PolicyPeriods{
 			Years:  []int{2099},
 			Months: nil,
@@ -112,10 +116,11 @@ func TestPolicyAllows_emptySelectionDeniesAll(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_months`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_years`)
+		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_states`)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_policy_catalogs`)
 	})
 
-	allow, err := repo.PolicyAllows(ctx, "XX", 2099, 12)
+	allow, err := repo.PolicyAllows(ctx, "XX", "AC", 2099, 12)
 	if err != nil || allow {
 		t.Fatalf("PolicyAllows with empty policy = %v, %v (want false)", allow, err)
 	}
