@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { Eraser, ListChecks } from "lucide-react";
 import { getPolicies, putPolicies } from "@/lib/api";
 import type { YearMonth } from "@/lib/types";
 import { formatCatalogLabel } from "@/lib/catalogLabels";
 import { POLICY_STATES } from "@/lib/stateLabels";
 import { Button } from "@/components/ui/button";
+import { ContextualHint } from "@/components/ContextualHint";
+import styles from "./DownloadPolicySection.module.css";
 
 const MONTHS = [
   "Janeiro",
@@ -401,6 +405,29 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
     })
     .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year));
 
+  const ActionIconButton = ({
+    title,
+    ariaLabel,
+    onClick,
+    children,
+  }: {
+    title: string;
+    ariaLabel: string;
+    onClick: () => void;
+    children: ReactNode;
+  }) => (
+    <ContextualHint text={title} ariaLabel={ariaLabel}>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={onClick}
+        className={`h-9 w-9 shrink-0 rounded-xl p-0 text-[var(--muted)] hover:text-[var(--foreground)] active:scale-[0.97] ${styles.actionIconButton}`}
+      >
+        {children}
+      </Button>
+    </ContextualHint>
+  );
+
   return (
     <section className="glass-card-strong rounded-2xl border border-[var(--border)]/70 p-6 mb-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -528,13 +555,29 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
           <h3 className="text-base font-semibold text-[var(--foreground)]">3. Catálogos</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">Selecione ao menos um catálogo para o processamento poder rodar.</p>
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filtrar por código ou nome"
-            className="form-control mt-3 mb-3 w-full rounded-xl px-3 py-2 text-sm"
-          />
+          <div className="mt-3 mb-3 flex items-center gap-2">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filtrar por código ou nome"
+              className={`form-control w-full rounded-xl px-3 py-2 text-sm ${styles.searchField}`}
+            />
+            <ActionIconButton
+              title="Selecionar todos os catálogos"
+              ariaLabel="Selecionar todos os catálogos"
+              onClick={() => setSelectedCatalogs(new Set(availableCatalogs))}
+            >
+              <ListChecks size={16} aria-hidden="true" />
+            </ActionIconButton>
+            <ActionIconButton
+              title="Limpar seleção de catálogos"
+              ariaLabel="Limpar seleção de catálogos"
+              onClick={() => setSelectedCatalogs(new Set())}
+            >
+              <Eraser size={16} aria-hidden="true" />
+            </ActionIconButton>
+          </div>
           <div className="max-h-[22rem] space-y-2 overflow-auto pr-1">
             {filteredCatalogs.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">Nenhum catálogo encontrado.</p>
@@ -560,29 +603,29 @@ export function DownloadPolicySection({ onSaved }: { onSaved?: () => void }) {
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--border)]/20 p-4">
           <h3 className="text-base font-semibold text-[var(--foreground)]">4. Estados</h3>
           <p className="mt-1 text-xs text-[var(--muted)]">Selecione os estados permitidos. Sem seleção, nada é processado.</p>
-          <div className="mt-3 mb-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="secondary-link-chip text-xs"
+          <div className="mt-3 mb-3 flex items-center gap-2">
+            <input
+              type="search"
+              value={stateQuery}
+              onChange={(e) => setStateQuery(e.target.value)}
+              placeholder="Filtrar por UF ou nome"
+              className={`form-control w-full rounded-xl px-3 py-2 text-sm ${styles.searchField}`}
+            />
+            <ActionIconButton
+              title="Selecionar todos os estados"
+              ariaLabel="Selecionar todos os estados"
               onClick={() => setSelectedStates(new Set(POLICY_STATES.map((state) => state.uf)))}
             >
-              Selecionar todos
-            </button>
-            <button
-              type="button"
-              className="secondary-link-chip text-xs"
+              <ListChecks size={16} aria-hidden="true" />
+            </ActionIconButton>
+            <ActionIconButton
+              title="Limpar seleção de estados"
+              ariaLabel="Limpar seleção de estados"
               onClick={() => setSelectedStates(new Set())}
             >
-              Limpar
-            </button>
+              <Eraser size={16} aria-hidden="true" />
+            </ActionIconButton>
           </div>
-          <input
-            type="search"
-            value={stateQuery}
-            onChange={(e) => setStateQuery(e.target.value)}
-            placeholder="Filtrar por UF ou nome"
-            className="form-control mt-3 mb-3 w-full rounded-xl px-3 py-2 text-sm"
-          />
           <div className="max-h-[22rem] space-y-2 overflow-auto pr-1">
             {filteredStates.map((state) => (
               <label
