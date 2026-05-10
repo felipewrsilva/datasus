@@ -12,6 +12,7 @@ tmp/
 tmp/**
 
 # build and coverage artifacts
+*.exe
 bin/
 dist/
 coverage/
